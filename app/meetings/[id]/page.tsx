@@ -1,0 +1,562 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { getMeeting } from "@/lib/services/meetings"
+import { getRecordings } from "@/lib/services/recordings"
+import { getTranscripts, generateTranscript } from "@/lib/services/transcripts"
+import { getPainPoints, generatePainPointsFromTranscript } from "@/lib/services/pain-points"
+import { useAuth } from "@/lib/auth-context"
+import { useToast } from "@/components/ui/use-toast"
+import { format } from "date-fns"
+import { FileAudio, Play, FileText, BrainCircuit, ArrowLeft, Upload, Loader2, AlertCircle } from "lucide-react"
+import Link from "next/link"
+import RecordingUploader from "@/components/recording-uploader"
+import { Textarea } from "@/components/ui/textarea"
+import { getRecordingURL } from "@/lib/services/recordings"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+export default function MeetingDetailPage() {
+  const params = useParams()
+  const meetingId = params.id as string
+  const router = useRouter()
+  const { user } = useAuth()
+  const { toast } = useToast()
+  
+  const [meeting, setMeeting] = useState<any>(null)
+  const [recordings, setRecordings] = useState<any[]>([])
+  const [transcripts, setTranscripts] = useState<any[]>([])
+  const [painPoints, setPainPoints] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [currentTab, setCurrentTab] = useState("details")
+  
+  const [showUploader, setShowUploader] = useState(false)
+  const [isGeneratingTranscript, setIsGeneratingTranscript] = useState(false)
+  const [isAnalyzingTranscript, setIsAnalyzingTranscript] = useState(false)
+  const [currentAudio, setCurrentAudio] = useState<string | null>(null)
+  const [showApiKeyError, setShowApiKeyError] = useState(false)
+
+  useEffect(() => {
+    async function loadMeetingData() {
+      if (!user || !meetingId) return
+
+      setLoading(true)
+      try {
+        const [meetingData, recordingsData, transcriptsData, painPointsData] = await Promise.all([
+          getMeeting(meetingId),
+          getRecordings(meetingId),
+          getTranscripts(meetingId),
+          getPainPoints(meetingId)
+        ])
+        
+        setMeeting(meetingData)
+        setRecordings(recordingsData)
+        setTranscripts(transcriptsData)
+        setPainPoints(painPointsData)
+      } catch (error) {
+        console.error("Error loading meeting data:", error)
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load meeting data"
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadMeetingData()
+  }, [meetingId, user, toast])
+
+  const handleRecordingUploaded = async (recording: any) => {
+    setRecordings([recording, ...recordings])
+    setShowUploader(false)
+    
+    // Update meeting
+    if (meeting) {
+      setMeeting({ ...meeting, has_recording: true, status: 'completed' })
+    }
+    
+    toast({
+      title: "Recording uploaded",
+      description: "Your recording has been uploaded successfully"
+    })
+  }
+
+  const handleGenerateTranscript = async (recordingId: string) => {
+    if (!user || !meetingId) return
+    
+    setIsGeneratingTranscript(true)
+    setShowApiKeyError(false)
+    
+    try {
+      const transcript = await generateTranscript(recordingId, meetingId, user.id)
+      
+      if (transcript) {
+        setTranscripts([transcript, ...transcripts])
+        
+        // Update meeting
+        if (meeting) {
+          setMeeting({ ...meeting, has_transcript: true })
+        }
+        
+        toast({
+          title: "Transcript generated",
+          description: "Your transcript has been generated successfully"
+        })
+        
+        // Switch to transcript tab
+        setCurrentTab("transcript")
+      }
+    } catch (error: any) {
+      console.error("Error generating transcript:", error);
+      
+      // Special handling for missing OpenAI API key
+      if (error.message && error.message.includes("OpenAI API key not found")) {
+        setShowApiKeyError(true);
+        
+        toast({
+          variant: "destructive",
+          title: "OpenAI API Key Required",
+          description: "To generate transcripts, you need to add your OpenAI API key in settings."
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Error generating transcript",
+          description: error.message || "An error occurred"
+        });
+      }
+    } finally {
+      setIsGeneratingTranscript(false)
+    }
+  }
+
+  const handleAnalyzeTranscript = async (transcriptId: string) => {
+    if (!user || !meetingId) return
+    
+    const transcript = transcripts.find(t => t.id === transcriptId)
+    if (!transcript) return
+    
+    setIsAnalyzingTranscript(true)
+    
+    try {
+      const painPointsData = await generatePainPointsFromTranscript(transcript.content, meetingId, user.id)
+      
+      if (painPointsData) {
+        setPainPoints([...painPointsData, ...painPoints])
+        
+        // Update meeting
+        if (meeting) {
+          setMeeting({ ...meeting, has_analysis: true, status: 'analyzed' })
+        }
+        
+        toast({
+          title: "Analysis complete",
+          description: "Pain points have been extracted from your transcript"
+        })
+        
+        // Switch to pain points tab
+        setCurrentTab("painpoints")
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Error analyzing transcript",
+        description: error.message || "An error occurred"
+      })
+    } finally {
+      setIsAnalyzingTranscript(false)
+    }
+  }
+
+  const playRecording = async (recordingId: string) => {
+    const recording = recordings.find(r => r.id === recordingId)
+    if (!recording) return
+    
+    try {
+      console.log("Getting URL for recording path:", recording.file_path)
+      const url = await getRecordingURL(recording.file_path)
+      console.log("Retrieved recording URL:", url)
+      
+      if (url) {
+        setCurrentAudio(url)
+      } else {
+        throw new Error("Failed to get recording URL")
+      }
+    } catch (error) {
+      console.error("Error playing recording:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Could not play recording. Check browser console for details."
+      })
+    }
+  }
+
+  useEffect(() => {
+    if (showApiKeyError) {
+      const timer = setTimeout(() => {
+        toast({
+          title: "Go to Settings",
+          description: "Add your OpenAI API key in the settings page",
+          action: (
+            <Button variant="default" size="sm" onClick={() => router.push('/settings')}>
+              Settings
+            </Button>
+          ),
+        });
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [showApiKeyError, router, toast]);
+
+  if (loading) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (!meeting) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" asChild>
+            <Link href="/meetings">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+          <h2 className="text-3xl font-bold tracking-tight">Meeting Not Found</h2>
+        </div>
+        <p>The meeting you're looking for doesn't exist or you don't have permission to view it.</p>
+      </div>
+    )
+  }
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "scheduled":
+        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Scheduled</Badge>
+      case "completed":
+        return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Completed</Badge>
+      case "analyzed":
+        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Analyzed</Badge>
+      default:
+        return <Badge variant="outline">{status}</Badge>
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="icon" asChild>
+          <Link href="/meetings">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+        <h2 className="text-3xl font-bold tracking-tight">Meeting Details</h2>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-2xl">
+                  {meeting.contacts?.name} at {meeting.companies?.name}
+                </CardTitle>
+                <CardDescription>
+                  {format(new Date(meeting.date), "PPPP")} at {meeting.time.substring(0, 5)}
+                </CardDescription>
+              </div>
+              <div>{getStatusBadge(meeting.status)}</div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={currentTab} onValueChange={setCurrentTab}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="details">Details</TabsTrigger>
+                <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                <TabsTrigger value="painpoints">Pain Points</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="details" className="mt-6">
+                <div className="space-y-6">
+                  {meeting.notes && (
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-medium">Meeting Notes</h3>
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">{meeting.notes}</p>
+                    </div>
+                  )}
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-medium">Recordings</h3>
+                      <Button size="sm" onClick={() => setShowUploader(true)} disabled={showUploader}>
+                        <Upload className="mr-2 h-4 w-4" />
+                        Upload Recording
+                      </Button>
+                    </div>
+                    
+                    {showApiKeyError && (
+                      <Alert variant="destructive" className="mb-4">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>OpenAI API Key Required</AlertTitle>
+                        <AlertDescription className="flex flex-col gap-2">
+                          <p>To generate transcripts, you need to add your OpenAI API key in settings.</p>
+                          <div>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => router.push('/settings')}
+                            >
+                              Go to Settings
+                            </Button>
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    
+                    {showUploader && (
+                      <RecordingUploader 
+                        meetingId={meetingId} 
+                        onUploadComplete={handleRecordingUploaded}
+                        onCancel={() => setShowUploader(false)}
+                      />
+                    )}
+                    
+                    {recordings.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No recordings available.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {recordings.map((recording) => (
+                          <div key={recording.id} className="flex items-center justify-between p-3 border rounded-md">
+                            <div className="flex items-center gap-2">
+                              <FileAudio className="h-5 w-5 text-muted-foreground" />
+                              <div>
+                                <p className="text-sm font-medium">{recording.file_name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {format(new Date(recording.created_at), "PP")}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => playRecording(recording.id)}
+                              >
+                                <Play className="h-4 w-4" />
+                              </Button>
+                              {!meeting.has_transcript && (
+                                <Button 
+                                  size="sm"
+                                  onClick={() => handleGenerateTranscript(recording.id)}
+                                  disabled={isGeneratingTranscript}
+                                >
+                                  {isGeneratingTranscript ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      Generating...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FileText className="mr-2 h-4 w-4" />
+                                      Generate Transcript
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {currentAudio && (
+                          <div className="mt-4">
+                            <audio 
+                              controls 
+                              className="w-full" 
+                              src={currentAudio}
+                              onEnded={() => setCurrentAudio(null)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="transcript" className="mt-6">
+                {transcripts.length === 0 ? (
+                  <div className="text-center py-10">
+                    <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
+                    <h3 className="mt-4 text-lg font-medium">No Transcript Available</h3>
+                    <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
+                      Upload a recording and generate a transcript to see it here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-medium">Transcript</h3>
+                      {!meeting.has_analysis && (
+                        <Button 
+                          onClick={() => handleAnalyzeTranscript(transcripts[0].id)}
+                          disabled={isAnalyzingTranscript}
+                        >
+                          {isAnalyzingTranscript ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Analyzing...
+                            </>
+                          ) : (
+                            <>
+                              <BrainCircuit className="mr-2 h-4 w-4" />
+                              Analyze Transcript
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="p-4 border rounded-md bg-muted/30 max-h-96 overflow-y-auto">
+                      <p className="text-sm whitespace-pre-wrap">{transcripts[0].content}</p>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="painpoints" className="mt-6">
+                {painPoints.length === 0 ? (
+                  <div className="text-center py-10">
+                    <BrainCircuit className="mx-auto h-12 w-12 text-muted-foreground" />
+                    <h3 className="mt-4 text-lg font-medium">No Pain Points Identified</h3>
+                    <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
+                      Generate a transcript and analyze it to identify pain points.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <h3 className="text-lg font-medium">Identified Pain Points</h3>
+                    <div className="grid gap-4">
+                      {painPoints.map((painPoint, index) => (
+                        <Card key={index}>
+                          <CardHeader className="pb-2">
+                            <div className="flex justify-between items-center">
+                              <CardTitle>{painPoint.title}</CardTitle>
+                              <Badge className={
+                                painPoint.impact === "High" 
+                                  ? "bg-red-50 text-red-700 border-red-200" 
+                                  : painPoint.impact === "Medium"
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : painPoint.impact === "Low"
+                                      ? "bg-blue-50 text-blue-700 border-blue-200"
+                                      : "bg-gray-50 text-gray-700 border-gray-200"
+                              }>
+                                {painPoint.impact}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="pt-0 space-y-4">
+                            <div>
+                              <h4 className="text-sm font-medium">Description</h4>
+                              <p className="text-sm text-muted-foreground">{painPoint.description}</p>
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-medium">Root Cause</h4>
+                              <p className="text-sm text-muted-foreground">{painPoint.root_cause}</p>
+                            </div>
+                            {painPoint.citations && (
+                              <div>
+                                <h4 className="text-sm font-medium">Citations</h4>
+                                <div className="text-sm text-muted-foreground bg-gray-50 p-3 rounded-md border border-gray-100 mt-1 whitespace-pre-wrap">
+                                  {painPoint.citations}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+        
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Contact Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium">Name</h3>
+                <p className="text-sm">{meeting.contacts?.name}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium">Email</h3>
+                <p className="text-sm">{meeting.contacts?.email}</p>
+              </div>
+              {meeting.contacts?.phone && (
+                <div>
+                  <h3 className="text-sm font-medium">Phone</h3>
+                  <p className="text-sm">{meeting.contacts?.phone}</p>
+                </div>
+              )}
+              <div>
+                <h3 className="text-sm font-medium">Role</h3>
+                <p className="text-sm">{meeting.contacts?.role}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium">Company</h3>
+                <p className="text-sm">{meeting.companies?.name}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium">Industry</h3>
+                <p className="text-sm">{meeting.companies?.industry}</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardHeader>
+              <CardTitle>Meeting Status</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <h3 className="text-sm font-medium">Recording</h3>
+                  <Badge variant={meeting.has_recording ? "default" : "outline"}>
+                    {meeting.has_recording ? "Available" : "Not Available"}
+                  </Badge>
+                </div>
+                <div className="flex justify-between">
+                  <h3 className="text-sm font-medium">Transcript</h3>
+                  <Badge variant={meeting.has_transcript ? "default" : "outline"}>
+                    {meeting.has_transcript ? "Available" : "Not Available"}
+                  </Badge>
+                </div>
+                <div className="flex justify-between">
+                  <h3 className="text-sm font-medium">Pain Point Analysis</h3>
+                  <Badge variant={meeting.has_analysis ? "default" : "outline"}>
+                    {meeting.has_analysis ? "Completed" : "Not Started"}
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}
+
