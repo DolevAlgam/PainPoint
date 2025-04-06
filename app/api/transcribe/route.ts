@@ -458,7 +458,7 @@ async function processTranscriptionInBackground(
     const segmentTranscriptions: string[] = [];
     
     // Define a concurrency limit to avoid overwhelming the API and memory
-    const MAX_CONCURRENT_REQUESTS = 3;
+    const MAX_CONCURRENT_REQUESTS = 10;
 
     // Create arrays to track segment processing
     const allSegments = [...segmentFiles];
