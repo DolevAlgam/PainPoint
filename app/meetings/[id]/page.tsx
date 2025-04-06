@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { getMeeting } from "@/lib/services/meetings"
-import { getRecordings } from "@/lib/services/recordings"
+import { getMeeting, updateMeeting } from "@/lib/services/meetings"
+import { getRecordings, getRecording } from "@/lib/services/recordings"
 import { getTranscripts, generateTranscript } from "@/lib/services/transcripts"
 import { getPainPoints, generatePainPointsFromTranscript } from "@/lib/services/pain-points"
 import { useAuth } from "@/lib/auth-context"
@@ -19,6 +19,7 @@ import RecordingUploader from "@/components/recording-uploader"
 import { Textarea } from "@/components/ui/textarea"
 import { getRecordingURL } from "@/lib/services/recordings"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { supabase } from "@/lib/supabase"
 
 export default function MeetingDetailPage() {
   const params = useParams()
@@ -39,6 +40,9 @@ export default function MeetingDetailPage() {
   const [isAnalyzingTranscript, setIsAnalyzingTranscript] = useState(false)
   const [currentAudio, setCurrentAudio] = useState<string | null>(null)
   const [showApiKeyError, setShowApiKeyError] = useState(false)
+  const [showTranscriptTool, setShowTranscriptTool] = useState(false)
+  const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null)
+  const [transcriptPollingInterval, setTranscriptPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     async function loadMeetingData() {
@@ -88,56 +92,134 @@ export default function MeetingDetailPage() {
   }
 
   const handleGenerateTranscript = async (recordingId: string) => {
-    if (!user || !meetingId) return
+    if (!meeting || !user) return;
     
-    setIsGeneratingTranscript(true)
-    setShowApiKeyError(false)
+    // Ensure all IDs are strings
+    const recordingIdStr = String(recordingId);
+    const meetingIdStr = String(meeting.id);
+    const userIdStr = String(user.id);
     
+    setIsGeneratingTranscript(true);
+
     try {
-      const transcript = await generateTranscript(recordingId, meetingId, user.id)
+      // First verify the recording exists and get fresh data
+      const freshRecording = await getRecording(recordingIdStr);
+      if (!freshRecording) {
+        setIsGeneratingTranscript(false);
+        toast({
+          variant: "destructive",
+          title: "Recording not found",
+          description: "The recording information could not be found. Try refreshing the page or uploading again."
+        });
+        return;
+      }
+      
+      // Call the generateTranscript function with properly formatted IDs
+      const transcript = await generateTranscript(recordingIdStr, meetingIdStr, userIdStr);
       
       if (transcript) {
-        setTranscripts([transcript, ...transcripts])
+        // Start polling for transcript status updates
+        startPollingTranscriptStatus(transcript.id);
         
-        // Update meeting
-        if (meeting) {
-          setMeeting({ ...meeting, has_transcript: true })
-        }
+        // Update UI state
+        setShowTranscriptTool(true);
+        setSelectedTranscriptId(transcript.id);
         
         toast({
-          title: "Transcript generated",
-          description: "Your transcript has been generated successfully"
-        })
-        
-        // Switch to transcript tab
-        setCurrentTab("transcript")
+          title: "Transcription started",
+          description: "The recording is being transcribed. This may take a few minutes for larger files.",
+        });
       }
     } catch (error: any) {
       console.error("Error generating transcript:", error);
       
-      // Special handling for missing OpenAI API key
-      if (error.message && error.message.includes("OpenAI API key not found")) {
-        setShowApiKeyError(true);
-        
+      // Format detailed error message for display
+      let errorMessage = error.message || "An error occurred during transcription";
+      
+      // Check for specific error types
+      if (errorMessage.includes('not found')) {
         toast({
           variant: "destructive",
-          title: "OpenAI API Key Required",
-          description: "To generate transcripts, you need to add your OpenAI API key in settings."
-        });
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Error generating transcript",
-          description: error.message || "An error occurred"
+          title: "Recording not found",
+          description: "Please try refreshing the page and trying again."
         });
       }
-    } finally {
-      setIsGeneratingTranscript(false)
+      else if (errorMessage.includes('OpenAI API')) {
+        toast({
+          variant: "destructive", 
+          title: "OpenAI API Error",
+          description: "There was an issue with the OpenAI transcription service. Check your API key in settings."
+        });
+        
+        setShowApiKeyError(true);
+      }
+      else {
+        toast({
+          variant: "destructive",
+          title: "Transcription error",
+          description: errorMessage,
+          action: (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => handleGenerateTranscript(recordingId)}
+            >
+              Retry
+            </Button>
+          )
+        });
+      }
+      
+      setIsGeneratingTranscript(false);
     }
-  }
+  };
+
+  const startPollingTranscriptStatus = (transcriptId: string) => {
+    // Poll every 5 seconds to check transcription status
+    const intervalId = setInterval(async () => {
+      try {
+        const { data: transcript } = await supabase
+          .from('transcripts')
+          .select('content')
+          .eq('id', transcriptId)
+          .single();
+        
+        if (transcript) {
+          // If content no longer contains "in progress", transcription is complete
+          if (!transcript.content.includes("Transcription in progress")) {
+            clearInterval(intervalId);
+            setIsGeneratingTranscript(false);
+            
+            // Switch to transcript tab after transcription is complete
+            setCurrentTab("transcript");
+            
+            toast({
+              title: "Transcription completed",
+              description: "The recording has been successfully transcribed."
+            });
+            
+            // Refresh data from the server to get updated meeting status
+            const updatedMeeting = await getMeeting(meetingId);
+            if (updatedMeeting) {
+              setMeeting(updatedMeeting);
+            }
+            
+            // Refresh the transcripts list
+            const updatedTranscripts = await getTranscripts(meeting.id);
+            setTranscripts(updatedTranscripts);
+          }
+        }
+      } catch (error) {
+        console.error("Error checking transcript status:", error);
+      }
+    }, 5000);
+    
+    // Store the interval ID for cleanup
+    setTranscriptPollingInterval(intervalId);
+  };
 
   const handleAnalyzeTranscript = async (transcriptId: string) => {
-    if (!user || !meetingId) return
+    if (!user || !meeting) return
     
     const transcript = transcripts.find(t => t.id === transcriptId)
     if (!transcript) return
@@ -145,7 +227,7 @@ export default function MeetingDetailPage() {
     setIsAnalyzingTranscript(true)
     
     try {
-      const painPointsData = await generatePainPointsFromTranscript(transcript.content, meetingId, user.id)
+      const painPointsData = await generatePainPointsFromTranscript(transcript.content, meeting.id, user.id)
       
       if (painPointsData) {
         setPainPoints([...painPointsData, ...painPoints])
@@ -179,9 +261,7 @@ export default function MeetingDetailPage() {
     if (!recording) return
     
     try {
-      console.log("Getting URL for recording path:", recording.file_path)
       const url = await getRecordingURL(recording.file_path)
-      console.log("Retrieved recording URL:", url)
       
       if (url) {
         setCurrentAudio(url)
@@ -193,7 +273,7 @@ export default function MeetingDetailPage() {
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Could not play recording. Check browser console for details."
+        description: "Could not play recording. Please try again."
       })
     }
   }
@@ -215,6 +295,15 @@ export default function MeetingDetailPage() {
       return () => clearTimeout(timer);
     }
   }, [showApiKeyError, router, toast]);
+
+  // Cleanup interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (transcriptPollingInterval) {
+        clearInterval(transcriptPollingInterval);
+      }
+    };
+  }, [transcriptPollingInterval]);
 
   if (loading) {
     return (

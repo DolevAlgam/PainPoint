@@ -1,7 +1,66 @@
 // This file handles the OpenAI API integration for transcription and analysis
 import OpenAI from "openai";
 
+// The maximum size OpenAI can process per request (25MB)
+const MAX_OPENAI_CHUNK_SIZE = 25 * 1024 * 1024;
+
+// Function to split an audio file into chunks below the OpenAI size limit
+async function splitAudioIntoChunks(file: File): Promise<File[]> {
+  if (file.size <= MAX_OPENAI_CHUNK_SIZE) {
+    return [file]; // No need to split
+  }
+
+  // For MVP simplicity, we'll just use simple blob slicing
+  // In a production app, you'd use a more sophisticated audio chunking method
+  // that ensures proper audio boundaries
+  
+  const totalChunks = Math.ceil(file.size / (MAX_OPENAI_CHUNK_SIZE * 0.95)); // 0.95 to leave some buffer
+  let chunks: File[] = [];
+  
+  // Create a reasonable overlap to avoid cutting off words at chunk boundaries
+  // Each chunk will overlap with the next by ~5% of the max size
+  const chunkSize = Math.floor(MAX_OPENAI_CHUNK_SIZE * 0.95);
+  const overlap = Math.floor(MAX_OPENAI_CHUNK_SIZE * 0.05);
+  
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i === 0 ? 0 : i * chunkSize - overlap;
+    const end = Math.min((i + 1) * chunkSize, file.size);
+    
+    const blobChunk = file.slice(start, end, file.type);
+    const chunkName = `${file.name.split('.')[0]}_part${i+1}.${file.name.split('.').pop()}`;
+    chunks.push(new File([blobChunk], chunkName, { type: file.type }));
+  }
+  
+  return chunks;
+}
+
 export async function transcribeAudio(file: File, apiKey: string): Promise<string> {
+  try {
+    // Split file into chunks if needed
+    const chunks = await splitAudioIntoChunks(file);
+    
+    // If only one chunk, use the existing method
+    if (chunks.length === 1) {
+      return await transcribeSingleChunk(chunks[0], apiKey);
+    }
+    
+    // Otherwise, transcribe each chunk and combine the results
+    const transcriptions = await Promise.all(
+      chunks.map(async (chunk, index) => {
+        return await transcribeSingleChunk(chunk, apiKey);
+      })
+    );
+    
+    // Join all transcriptions with a space separator
+    return transcriptions.join(' ');
+  } catch (error) {
+    console.error("Transcription error:", error);
+    throw error;
+  }
+}
+
+// This handles the actual API call to OpenAI
+async function transcribeSingleChunk(file: File, apiKey: string): Promise<string> {
   try {
     // Create a FormData object to send the file
     const formData = new FormData()
@@ -27,7 +86,7 @@ export async function transcribeAudio(file: File, apiKey: string): Promise<strin
     const data = await response.json()
     return data.text
   } catch (error) {
-    console.error("Transcription error:", error)
+    console.error(`Error transcribing chunk: ${error}`)
     throw error
   }
 }
@@ -201,8 +260,6 @@ ${roughAnalysisText}
       top_p: 1,
       store: false
     });
-
-    console.log("Second API call response structure:", JSON.stringify(structuredJsonResponse, null, 2));
 
     // The second call returns a structured JSON response
     // We need to extract just the pain_points array from the response for compatibility with existing code

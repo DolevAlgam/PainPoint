@@ -27,9 +27,9 @@ export default function RecordingUploader({ meetingId, onUploadComplete, onCance
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      // Check file size (25MB limit)
-      if (file.size > 25 * 1024 * 1024) {
-        setUploadError("File size exceeds 25MB limit")
+      // Check file size (100MB limit)
+      if (file.size > 100 * 1024 * 1024) {
+        setUploadError("File size exceeds 100MB limit")
         return
       }
 
@@ -173,7 +173,7 @@ export default function RecordingUploader({ meetingId, onUploadComplete, onCance
         <div className="rounded-md border p-3 bg-muted/50">
           <h4 className="text-xs font-medium mb-1">Supported Formats</h4>
           <p className="text-xs text-muted-foreground">MP3, MP4, MPEG, MPGA, M4A, WAV, WEBM, OGG, FLAC</p>
-          <p className="text-xs text-muted-foreground mt-1">Maximum size: 25MB</p>
+          <p className="text-xs text-muted-foreground mt-1">Maximum size: 100MB</p>
         </div>
       </CardContent>
       <CardFooter className="justify-between">

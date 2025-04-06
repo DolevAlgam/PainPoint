@@ -301,3 +301,6 @@ After we already
 feedback on all buttons for loading.
 
 As this is an MVP I want you to remove these from the frontend: Data export (Export Insights at /insights, At account tab and API Configuration tab under /settings), notifications, configuration of auto-generate transcripts and auto-analyze converstaions
+
+
+Don't direct user to transcription page.
