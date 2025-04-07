@@ -137,11 +137,9 @@ export async function getRecentAnalysis(limit = 3) {
       .select(`
         id,
         date,
-        contact_id,
         contacts:contacts (
           name
         ),
-        company_id,
         companies:companies (
           name
         ),
@@ -153,13 +151,19 @@ export async function getRecentAnalysis(limit = 3) {
       
     if (error) throw error;
     
-    return data?.map(meeting => ({
-      id: meeting.id,
-      date: meeting.date,
-      contactName: meeting.contacts?.name || '',
-      company: meeting.companies?.name || '',
-      painPoints: meeting.pain_points ? meeting.pain_points.length : 0
-    })) || [];
+    return data?.map(meeting => {
+      // Type assertions to handle nested object structure
+      const contacts = meeting.contacts as any;
+      const companies = meeting.companies as any;
+      
+      return {
+        id: meeting.id,
+        date: meeting.date,
+        contactName: contacts?.name || '',
+        company: companies?.name || '',
+        painPoints: meeting.pain_points ? meeting.pain_points.length : 0
+      };
+    }) || [];
   } catch (error) {
     console.error('Error fetching recent analysis:', error);
     return [];
@@ -169,6 +173,52 @@ export async function getRecentAnalysis(limit = 3) {
 // Get most common pain points
 export async function getCommonPainPoints(limit = 3) {
   try {
+    // First check if we have clusters in the pain_point_clusters table
+    const { data: clusterData, error: clusterError } = await supabase
+      .from('pain_point_clusters')
+      .select('*')
+      .order('count', { ascending: false })
+      .limit(limit);
+
+    // If we have clusters and no error, use them
+    if (clusterData && clusterData.length > 0 && !clusterError) {
+      console.log(`Dashboard: Using ${clusterData.length} pain point clusters`);
+      
+      // Map clusters to the expected format
+      const formattedClusters = clusterData.map(cluster => {
+        // Ensure companies is an array
+        let companies = [];
+        
+        if (cluster.companies) {
+          // If it's already an array, use it
+          if (Array.isArray(cluster.companies)) {
+            companies = cluster.companies;
+          } 
+          // If it's a string representation of an array, parse it
+          else if (typeof cluster.companies === 'string') {
+            try {
+              companies = JSON.parse(cluster.companies);
+            } catch (e) {
+              console.error('Error parsing companies JSON:', e);
+            }
+          }
+        }
+        
+        console.log(`Dashboard: Cluster "${cluster.cluster_name}" has ${companies.length} companies and count ${cluster.count}`);
+        
+        return {
+          title: cluster.cluster_name,
+          count: cluster.count,
+          companies: companies
+        };
+      });
+      
+      return formattedClusters;
+    }
+    
+    // If no clusters available, fall back to the original implementation
+    console.log("Dashboard: No clusters found, falling back to manual aggregation");
+    
     // Fetch all pain points
     const { data: painPointsData, error: painPointsError } = await supabase
       .from('pain_points')
@@ -180,7 +230,10 @@ export async function getCommonPainPoints(limit = 3) {
     // Fetch meeting details for each pain point
     const meetingIds = [...new Set(painPointsData?.map(pp => pp.meeting_id) || [])];
     
-    if (meetingIds.length === 0) return [];
+    if (meetingIds.length === 0) {
+      console.log("Dashboard: No pain points found");
+      return [];
+    }
     
     const { data: meetingsData, error: meetingsError } = await supabase
       .from('meetings')
@@ -229,6 +282,7 @@ export async function getCommonPainPoints(limit = 3) {
       .sort((a, b) => b.count - a.count)
       .slice(0, limit);
     
+    console.log(`Dashboard: Found ${result.length} aggregated pain points`);
     return result;
   } catch (error) {
     console.error('Error fetching common pain points:', error);
