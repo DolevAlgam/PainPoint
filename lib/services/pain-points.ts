@@ -259,17 +259,16 @@ export async function getCommonPainPointsWithAI(forceRefresh = false) {
         const shouldRefresh = await shouldRefreshClusters();
         console.log(`🔍 PainPoints Service: Should refresh? ${shouldRefresh}`)
         
-        // If there's no need to refresh, return the cached results
-        if (!shouldRefresh) {
-          console.log("🔍 PainPoints Service: Using cached results")
-          const lastUpdated = await getLastClusterAnalysisTime();
-          console.log(`🔍 PainPoints Service: Last updated: ${lastUpdated}`)
-          return {
-            clusters: cachedClusters,
-            lastUpdated: lastUpdated,
-            needsRefresh: false
-          };
-        }
+        // Always return cached results when not forcing refresh, 
+        // but indicate if a refresh is needed
+        console.log("🔍 PainPoints Service: Using cached results")
+        const lastUpdated = await getLastClusterAnalysisTime();
+        console.log(`🔍 PainPoints Service: Last updated: ${lastUpdated}`)
+        return {
+          clusters: cachedClusters,
+          lastUpdated: lastUpdated,
+          needsRefresh: shouldRefresh
+        };
       }
     }
 

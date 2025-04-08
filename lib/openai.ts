@@ -428,7 +428,7 @@ Your task is to semantically cluster these pain points, even if they are describ
 # Output Format:
 For each cluster, provide:
 1. A clear, concise name for this group of similar pain points
-2. A 1-2 sentence description of the common theme
+2. A 3-4 sentence description of the common theme
 3. Number of pain points in this cluster
 4. List of IDs of all pain points in this cluster
 5. Summary of impact levels (how many high/medium/low)
