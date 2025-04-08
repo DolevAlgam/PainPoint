@@ -302,63 +302,25 @@ async function processTranscriptionInBackground(
   let apiKey = '';
   
   try {
-    // Retrieve user's OpenAI API key from users metadata
-    console.log('Retrieving user OpenAI API key');
-    const { data: userData, error: userError } = await adminSupabase
-      .from('users')  // Correct table name in Supabase
-      .select('*')
-      .eq('id', userId)
+    // Retrieve user's OpenAI API key from user_settings table
+    console.log('Retrieving user OpenAI API key from user_settings');
+    const { data: userSettings, error: settingsError } = await adminSupabase
+      .from('user_settings')
+      .select('openai_api_key')
+      .eq('user_id', userId)
       .single();
     
-    if (userError) {
-      console.error('Error fetching user from users table:', userError.message);
-      // Try alternative approach using auth API
-      try {
-        console.log('Trying alternative approach to fetch user data via auth API...');
-        const { data: authUser, error: authError } = await adminSupabase.auth.admin.getUserById(userId);
-        
-        if (authError) throw authError;
-        
-        if (authUser?.user?.user_metadata?.openai_api_key) {
-          apiKey = authUser.user.user_metadata.openai_api_key;
-          console.log('Found API key in user metadata using auth API');
-        } else {
-          // Fallback to environment variable
-          console.log('No API key found in auth user metadata, falling back to environment variable');
-          apiKey = process.env.OPENAI_API_KEY || '';
-          
-          if (!apiKey) {
-            throw new Error('No OpenAI API key available. Please add your API key in settings.');
-          }
-        }
-      } catch (authApiError: any) {
-        console.error('Error with auth API:', authApiError.message);
-        // Continue with fallback to environment variable
-        console.log('Falling back to environment variable after all user fetch methods failed');
-        apiKey = process.env.OPENAI_API_KEY || '';
-        
-        if (!apiKey) {
-          throw new Error('No OpenAI API key available. Please add your API key in settings.');
-        }
-      }
-    } else {
-      // Try to get API key from user metadata in users table
-      if (userData?.openai_api_key) {
-        apiKey = userData.openai_api_key;
-        console.log('Found API key in users table');
-      } else if (userData?.metadata?.openai_api_key) {
-        apiKey = userData.metadata.openai_api_key;
-        console.log('Found API key in users metadata field');
-      } else {
-        // Fallback to environment variable
-        console.log('No API key found in users table, falling back to environment variable');
-        apiKey = process.env.OPENAI_API_KEY || '';
-        
-        if (!apiKey) {
-          throw new Error('No OpenAI API key available. Please add your API key in settings.');
-        }
-      }
+    if (settingsError) {
+      console.error('Error fetching user settings:', settingsError.message);
+      throw new Error('Failed to retrieve OpenAI API key from user settings');
     }
+    
+    if (!userSettings?.openai_api_key) {
+      throw new Error('No OpenAI API key found in user settings. Please add your API key in settings.');
+    }
+    
+    apiKey = userSettings.openai_api_key;
+    console.log('Found API key in user_settings table');
     
     // Update transcript status to processing  
     console.log('Updating transcript to show processing started');
