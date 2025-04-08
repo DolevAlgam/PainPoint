@@ -543,7 +543,7 @@ export default function InsightsPage() {
                       <div className="mt-4">
                         <h4 className="text-sm font-medium mb-2">Example Pain Points</h4>
                         <div className="space-y-2">
-                          {selectedCluster.examples && selectedCluster.examples.slice(0, 3).map((example: any, i: number) => (
+                          {selectedCluster.examples && selectedCluster.examples.map((example: any, i: number) => (
                             <div key={i} className="bg-muted/50 rounded-md p-3">
                               <p className="font-medium text-sm">{example.title}</p>
                               <p className="text-xs text-muted-foreground mt-1">{example.description}</p>
@@ -673,8 +673,8 @@ export default function InsightsPage() {
                             </div>
                             
                             <div>
-                              <h4 className="text-sm font-medium mb-2">Example Pain Points</h4>
-                              <ScrollArea className="h-[250px] rounded-md border p-2">
+                              <h4 className="text-sm font-medium mb-2">All Pain Points</h4>
+                              <ScrollArea className="h-[400px] rounded-md border p-2">
                                 <div className="space-y-3 pr-3">
                                   {cluster.examples?.map((example: any, i: number) => (
                                     <div key={i} className="bg-muted/50 rounded-md p-3">

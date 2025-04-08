@@ -352,9 +352,8 @@ export async function getCommonPainPointsWithAI(forceRefresh = false) {
     // Enhance each cluster with example pain points
     console.log("🔍 PainPoints Service: Enhancing clusters with examples")
     const enhancedClusters = clusters.map((cluster: any) => {
-      // Get the first 3 pain points as examples
+      // Get ALL pain points as examples, not just the first 3
       const examples = cluster.pain_point_ids
-        .slice(0, 3)
         .map((id: string) => painPointsMap[id])
         .filter(Boolean);
 
