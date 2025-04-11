@@ -38,6 +38,44 @@ export async function getRecording(id: string) {
 
 export async function createRecording(recording: NewRecording) {
   try {
+    // Check if there are any existing recordings for this meeting
+    const { data: existingRecordings, error: checkError } = await supabase
+      .from('recordings')
+      .select('id, file_path')
+      .eq('meeting_id', recording.meeting_id);
+      
+    if (checkError) throw checkError;
+    
+    // Check if we have existing transcripts/analysis that will need updating
+    const { data: existingMeeting } = await supabase
+      .from('meetings')
+      .select('has_transcript, has_analysis')
+      .eq('id', recording.meeting_id)
+      .single();
+      
+    const hasExistingTranscript = existingMeeting?.has_transcript;
+    const hasExistingAnalysis = existingMeeting?.has_analysis;
+    
+    // If there are existing recordings, delete them
+    if (existingRecordings && existingRecordings.length > 0) {
+      for (const existingRecording of existingRecordings) {
+        // Delete file from storage if file_path exists
+        if (existingRecording.file_path) {
+          await supabase
+            .storage
+            .from('recordings')
+            .remove([existingRecording.file_path]);
+        }
+        
+        // Delete the recording record
+        await supabase
+          .from('recordings')
+          .delete()
+          .eq('id', existingRecording.id);
+      }
+    }
+    
+    // Now create the new recording
     const { data, error } = await supabase
       .from('recordings')
       .insert(recording)
@@ -47,11 +85,14 @@ export async function createRecording(recording: NewRecording) {
     if (error) throw error;
     
     // Update the meeting to indicate it has a recording
+    // If transcript/analysis existed, mark them as outdated but don't remove them
     await supabase
       .from('meetings')
       .update({ 
         has_recording: true,
-        status: 'completed'
+        status: 'completed',
+        transcript_outdated: hasExistingTranscript ? true : false,
+        analysis_outdated: hasExistingAnalysis ? true : false
       })
       .eq('id', recording.meeting_id);
       
@@ -191,4 +232,4 @@ export async function getRecordingURL(path: string, adminClient?: any) {
     console.error(`Error getting recording URL for path ${path}:`, error);
     return null;
   }
-} 
+}

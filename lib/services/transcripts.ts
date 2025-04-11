@@ -132,6 +132,15 @@ export async function generateTranscript(recordingId: string, meetingId: string,
       throw new Error(`Recording with ID ${recordingId} not found in database`);
     }
     
+    // Reset outdated flags first, regardless of whether the transcription succeeds
+    await supabase
+      .from('meetings')
+      .update({
+        transcript_outdated: false,
+        analysis_outdated: true // Mark analysis as outdated if a new transcript is generated
+      })
+      .eq('id', meetingId);
+    
     const response = await fetch('/api/transcribe', {
       method: 'POST',
       headers: {

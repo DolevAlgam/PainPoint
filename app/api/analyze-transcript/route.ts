@@ -101,6 +101,17 @@ async function processAnalysisInBackground(
     // Analyze the transcript using OpenAI
     const painPointsData = await analyzePainPoints(transcriptContent, apiKey);
 
+    // First, delete all existing pain points for this meeting
+    const { error: deleteError } = await adminSupabase
+      .from('pain_points')
+      .delete()
+      .eq('meeting_id', meetingId);
+
+    if (deleteError) {
+      console.error('Error deleting existing pain points:', deleteError);
+      throw new Error(`Failed to delete existing pain points: ${deleteError.message}`);
+    }
+
     // Create pain points in the database
     const painPoints = painPointsData.map((pp: any) => ({
       meeting_id: meetingId,
@@ -134,7 +145,8 @@ async function processAnalysisInBackground(
       .update({ 
         has_analysis: true,
         status: 'analyzed',
-        analysis_status: 'completed'
+        analysis_status: 'completed',
+        analysis_outdated: false
       })
       .eq('id', meetingId);
   } catch (error: any) {

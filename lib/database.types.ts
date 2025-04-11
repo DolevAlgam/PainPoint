@@ -76,6 +76,8 @@ export interface Database {
           has_recording: boolean
           has_transcript: boolean
           has_analysis: boolean
+          transcript_outdated: boolean
+          analysis_outdated: boolean
           created_at: string
           user_id: string
         }
@@ -90,6 +92,8 @@ export interface Database {
           has_recording?: boolean
           has_transcript?: boolean
           has_analysis?: boolean
+          transcript_outdated?: boolean
+          analysis_outdated?: boolean
           created_at?: string
           user_id: string
         }
@@ -104,6 +108,8 @@ export interface Database {
           has_recording?: boolean
           has_transcript?: boolean
           has_analysis?: boolean
+          transcript_outdated?: boolean
+          analysis_outdated?: boolean
           created_at?: string
           user_id?: string
         }

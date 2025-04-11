@@ -83,12 +83,22 @@ export default function MeetingDetailPage() {
   }, [meetingId, user, toast])
 
   const handleRecordingUploaded = async (recording: any) => {
-    setRecordings([recording, ...recordings])
+    // Replace all recordings with just the new one instead of appending
+    setRecordings([recording])
     setShowUploader(false)
     
-    // Update meeting
+    // Update meeting with outdated flags immediately
     if (meeting) {
-      setMeeting({ ...meeting, has_recording: true, status: 'completed' })
+      const hasExistingTranscript = meeting.has_transcript;
+      const hasExistingAnalysis = meeting.has_analysis;
+      
+      setMeeting({ 
+        ...meeting, 
+        has_recording: true, 
+        status: 'completed',
+        transcript_outdated: hasExistingTranscript ? true : false,
+        analysis_outdated: hasExistingAnalysis ? true : false
+      })
     }
     
     toast({
@@ -191,8 +201,19 @@ export default function MeetingDetailPage() {
           .single();
         
         if (transcript) {
-          // If content no longer contains "in progress", transcription is complete
-          if (!transcript.content.includes("Transcription in progress")) {
+          // Only consider transcription complete when it doesn't have any of these progress markers
+          const inProgressMarkers = [
+            "Transcription in progress",
+            "Transcribing segment",
+            "Processing audio",
+            "Converting audio"
+          ];
+          
+          const isStillInProgress = inProgressMarkers.some(marker => 
+            transcript.content.includes(marker)
+          );
+          
+          if (!isStillInProgress) {
             clearInterval(intervalId);
             setIsGeneratingTranscript(false);
             
@@ -213,6 +234,9 @@ export default function MeetingDetailPage() {
             // Refresh the transcripts list
             const updatedTranscripts = await getTranscripts(meeting.id);
             setTranscripts(updatedTranscripts);
+          } else {
+            // Still in progress, ensure the generating flag stays true
+            setIsGeneratingTranscript(true);
           }
         }
       } catch (error) {
@@ -307,22 +331,32 @@ export default function MeetingDetailPage() {
         description: "Your transcript is being analyzed. This may take a minute."
       });
       
+      // Update local state to show analysis is in progress
+      setMeeting({
+        ...meeting,
+        analysis_status: 'in_progress'
+      });
+      
       // Switch to pain points tab to show status
       setCurrentTab("painpoints");
       
-      // Stop showing the loading spinner on the button
-      setIsAnalyzingTranscript(false);
+      // Don't reset isAnalyzingTranscript until polling is complete
+      // This is to ensure the UI shows that analysis is in progress
       
       // Start polling for completion (every 5 seconds)
       const pollInterval = setInterval(async () => {
         const isComplete = await checkAnalysisStatus();
         if (isComplete) {
           clearInterval(pollInterval);
+          setIsAnalyzingTranscript(false);
         }
       }, 5000);
       
       // Clear interval after 10 minutes maximum (safety cleanup)
-      setTimeout(() => clearInterval(pollInterval), 10 * 60 * 1000);
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setIsAnalyzingTranscript(false);
+      }, 10 * 60 * 1000);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -381,6 +415,14 @@ export default function MeetingDetailPage() {
       }
     };
   }, [transcriptPollingInterval]);
+
+  // Add this function near the top of the component
+  const getImpactBadgeClass = (impact: string) => {
+    if (impact === "High") return "bg-red-50 text-red-700 border-red-200";
+    if (impact === "Medium") return "bg-amber-50 text-amber-700 border-amber-200";
+    if (impact === "Low") return "bg-blue-50 text-blue-700 border-blue-200";
+    return "bg-gray-50 text-gray-700 border-gray-200";
+  };
 
   if (loading) {
     return (
@@ -571,9 +613,38 @@ export default function MeetingDetailPage() {
                   </div>
                 ) : (
                   <div className="space-y-6">
+                    {meeting.transcript_outdated && (
+                      <Alert variant="destructive" className="mb-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Transcript Outdated</AlertTitle>
+                        <AlertDescription className="flex flex-col gap-2">
+                          <p>This transcript is from a previous recording. Regenerate it for the new recording.</p>
+                          <div>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => recordings.length > 0 && handleGenerateTranscript(recordings[0].id)}
+                              disabled={isGeneratingTranscript || recordings.length === 0}
+                            >
+                              {isGeneratingTranscript ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Regenerating...
+                                </>
+                              ) : (
+                                <>
+                                  <FileText className="mr-2 h-4 w-4" />
+                                  Regenerate Transcript
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
                     <div className="flex justify-between items-center">
                       <h3 className="text-lg font-medium">Transcript</h3>
-                      {!meeting.has_analysis && (
+                      {!meeting.has_analysis && !meeting.transcript_outdated && (
                         <Button 
                           onClick={() => handleAnalyzeTranscript(transcripts[0].id)}
                           disabled={isAnalyzingTranscript}
@@ -623,7 +694,74 @@ export default function MeetingDetailPage() {
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    <h3 className="text-lg font-medium">Identified Pain Points</h3>
+                    {meeting.analysis_status === 'in_progress' && (
+                      <Alert className="bg-amber-50 border-amber-200">
+                        <Loader2 className="h-4 w-4 animate-spin text-amber-700 mr-2" />
+                        <AlertTitle className="text-amber-700">Analysis in Progress</AlertTitle>
+                        <AlertDescription className="text-amber-700">
+                          Your transcript is being reanalyzed. This may take a minute. 
+                          The existing pain points will be updated once analysis completes.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    {meeting.analysis_outdated && (
+                      <Alert variant="destructive" className="mb-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>Analysis Outdated</AlertTitle>
+                        <AlertDescription className="flex flex-col gap-2">
+                          <p>This analysis is from a previous recording. Regenerate the transcript first, then analyze again.</p>
+                          <div>
+                            {meeting.transcript_outdated ? (
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => recordings.length > 0 && handleGenerateTranscript(recordings[0].id)}
+                                disabled={isGeneratingTranscript || recordings.length === 0}
+                              >
+                                {isGeneratingTranscript ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Regenerating Transcript...
+                                  </>
+                                ) : (
+                                  <>
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Regenerate Transcript First
+                                  </>
+                                )}
+                              </Button>
+                            ) : (
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => transcripts.length > 0 && handleAnalyzeTranscript(transcripts[0].id)}
+                                disabled={isAnalyzingTranscript || transcripts.length === 0 || isGeneratingTranscript}
+                              >
+                                {isAnalyzingTranscript ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Reanalyzing...
+                                  </>
+                                ) : isGeneratingTranscript ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Waiting for Transcript...
+                                  </>
+                                ) : (
+                                  <>
+                                    <BrainCircuit className="mr-2 h-4 w-4" />
+                                    Reanalyze Transcript
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-medium">Identified Pain Points</h3>
+                    </div>
                     <div className="grid gap-4">
                       {painPoints.map((painPoint, index) => (
                         <Card key={index}>
@@ -633,15 +771,7 @@ export default function MeetingDetailPage() {
                               <TooltipProvider>
                                 <Tooltip delayDuration={100}>
                                   <TooltipTrigger asChild>
-                                    <Badge className={
-                                      painPoint.impact === "High" 
-                                        ? "bg-red-50 text-red-700 border-red-200" 
-                                        : painPoint.impact === "Medium"
-                                          ? "bg-amber-50 text-amber-700 border-amber-200"
-                                          : painPoint.impact === "Low"
-                                            ? "bg-blue-50 text-blue-700 border-blue-200"
-                                            : "bg-gray-50 text-gray-700 border-gray-200"
-                                    }>
+                                    <Badge className={getImpactBadgeClass(painPoint.impact)}>
                                       {painPoint.impact}
                                     </Badge>
                                   </TooltipTrigger>

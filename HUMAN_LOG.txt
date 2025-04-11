@@ -285,25 +285,13 @@ Of course the same gpt4o transcriber as before
 
 
 
-Does the search at the top right work?
-
 
 
 status of meetings, if it's past the date, it should be shown as past, etc.
 
 Allow adding meeting notes after meeting is created and recording is uploaded - allow notes at any stage.
 
-Why are we allowing multiple recordings to be uploaded? allow one and tell the user if he uploads another one, it will replace the previous one.
-
-After we already 
-
-
-feedback on all buttons for loading.
-
 As this is an MVP I want you to remove these from the frontend: Data export (Export Insights at /insights, At account tab and API Configuration tab under /settings), notifications, configuration of auto-generate transcripts and auto-analyze converstaions
-
-
-Don't direct user to transcription page.
 
 
 Let's show graph of meetings over time
