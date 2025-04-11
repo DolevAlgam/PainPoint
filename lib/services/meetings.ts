@@ -201,4 +201,34 @@ export async function getAnalyzedMeetings() {
     console.error('Error fetching analyzed meetings:', error);
     return [];
   }
+}
+
+export async function getMeetingsByContactId(contactId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('meetings')
+      .select(`
+        *,
+        contacts (
+          id,
+          name,
+          email,
+          role
+        ),
+        companies (
+          id,
+          name,
+          industry
+        ),
+        transcripts (id)
+      `)
+      .eq('contact_id', contactId)
+      .order('date', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error(`Error fetching meetings for contact ${contactId}:`, error);
+    return [];
+  }
 } 

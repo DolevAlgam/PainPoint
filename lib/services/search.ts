@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import type { Database } from '../database.types';
+import { format } from 'date-fns';
 
 export type Contact = Database['public']['Tables']['contacts']['Row'];
 export type Meeting = Database['public']['Tables']['meetings']['Row'];
@@ -114,7 +115,7 @@ async function searchMeetings(query: string): Promise<SearchResult[]> {
     return (data || []).map(meeting => {
       const contactName = meeting.contacts?.name || 'Unknown Contact';
       const companyName = meeting.companies?.name || 'Unknown Company';
-      const meetingDate = new Date(meeting.date).toLocaleDateString();
+      const meetingDate = format(new Date(meeting.date), "PP");
       
       return {
         id: meeting.id,

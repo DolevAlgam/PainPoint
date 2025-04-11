@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
+import { format } from 'date-fns'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -133,7 +134,7 @@ export function exportMeetingPainPoints(painPoints: any[], meetingTitle?: string
       'Description': pp.description || 'N/A',
       'Root Cause': pp.root_cause || 'Not specified',
       'Impact': pp.impact || 'Not specified',
-      'Created At': pp.created_at ? new Date(pp.created_at).toLocaleDateString() : 'N/A'
+      'Created At': pp.created_at ? format(new Date(pp.created_at), "PP") : 'N/A'
     }
   })
   
@@ -197,7 +198,7 @@ export function exportContacts(contacts: any[]) {
       'Company': contact.companies?.name || 'N/A',
       'Industry': contact.companies?.industry || 'N/A',
       'Notes': contact.notes || '',
-      'Created At': contact.created_at ? new Date(contact.created_at).toLocaleDateString() : 'N/A'
+      'Created At': contact.created_at ? format(new Date(contact.created_at), "PP") : 'N/A'
     }
   })
   
@@ -252,14 +253,14 @@ export function exportMeetings(meetings: any[]) {
   const meetingsData = meetings.map((meeting, index) => {
     return {
       'ID': meeting.id || index + 1,
-      'Date': meeting.date ? new Date(meeting.date).toLocaleDateString() : 'N/A',
+      'Date': meeting.date ? format(new Date(meeting.date), "PP") : 'N/A',
       'Contact': meeting.contacts?.name || 'N/A',
       'Company': meeting.companies?.name || 'N/A',
       'Industry': meeting.companies?.industry || 'N/A',
       'Notes': meeting.notes || '',
       'Pain Points Count': Array.isArray(meeting.pain_points) ? meeting.pain_points.length : 0,
       'Has Transcript': Array.isArray(meeting.transcripts) && meeting.transcripts.length > 0 ? 'Yes' : 'No',
-      'Created At': meeting.created_at ? new Date(meeting.created_at).toLocaleDateString() : 'N/A'
+      'Created At': meeting.created_at ? format(new Date(meeting.created_at), "PP") : 'N/A'
     }
   })
   
@@ -298,7 +299,7 @@ export function exportMeetings(meetings: any[]) {
       // Add meeting header info - remove title
       detailRows.push(
         { A: "Meeting Details", B: "" },
-        { A: "Date:", B: meeting.date ? new Date(meeting.date).toLocaleDateString() : 'N/A' },
+        { A: "Date:", B: meeting.date ? format(new Date(meeting.date), "PP") : 'N/A' },
         { A: "Contact:", B: meeting.contacts?.name || 'N/A' },
         { A: "Company:", B: meeting.companies?.name || 'N/A' },
         { A: "Notes:", B: meeting.notes || 'N/A' },

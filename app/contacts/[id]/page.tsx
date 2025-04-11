@@ -1,25 +1,89 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Calendar, Mail, Phone, Building, User, Briefcase } from "lucide-react"
 import Link from "next/link"
 import { ContactMeetings } from "@/components/contact-meetings"
-import { ContactNotes } from "@/components/contact-notes"
+import { getContact, type Contact } from "@/lib/services/contacts"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useParams } from "next/navigation"
 
-export default function ContactDetailPage({
-  params,
-}: {
-  params: { id: string }
-}) {
-  // This would be fetched from your API in a real application
-  const contact = {
-    id: params.id,
-    name: "John Smith",
-    role: "CTO",
-    company: "Acme Inc.",
-    industry: "Software",
-    email: "john.smith@acme.com",
-    phone: "+1 (555) 123-4567",
+// Extending Contact type to include companies data that's joined in the API
+interface ContactWithCompany extends Contact {
+  companies?: {
+    id: string;
+    name: string;
+    industry: string;
+  };
+}
+
+export default function ContactDetailPage() {
+  const params = useParams()
+  const contactId = params.id as string
+  
+  const [contact, setContact] = useState<ContactWithCompany | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchContact = async () => {
+      try {
+        const data = await getContact(contactId)
+        setContact(data as ContactWithCompany)
+      } catch (error) {
+        console.error("Error loading contact:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchContact()
+  }, [contactId])
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <Skeleton className="h-9 w-48" />
+          <Skeleton className="h-10 w-44" />
+        </div>
+        <div className="grid gap-6 md:grid-cols-3">
+          <Card className="md:col-span-1">
+            <CardHeader>
+              <CardTitle>Contact Information</CardTitle>
+              <Skeleton className="h-4 w-48 mt-1" />
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Skeleton className="h-4 w-4" />
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <div className="md:col-span-2">
+            <Skeleton className="h-[400px] w-full" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!contact) {
+    return (
+      <div className="py-8 text-center">
+        <h2 className="text-xl font-semibold mb-2">Contact Not Found</h2>
+        <p className="text-muted-foreground mb-4">The contact you're looking for doesn't exist or has been removed.</p>
+        <Button asChild>
+          <Link href="/contacts">Go Back to Contacts</Link>
+        </Button>
+      </div>
+    )
   }
 
   return (
@@ -33,9 +97,6 @@ export default function ContactDetailPage({
               Schedule Meeting
             </Link>
           </Button>
-          <Button variant="outline" asChild>
-            <Link href={`/contacts/${contact.id}/edit`}>Edit Contact</Link>
-          </Button>
         </div>
       </div>
 
@@ -44,7 +105,7 @@ export default function ContactDetailPage({
           <CardHeader>
             <CardTitle>Contact Information</CardTitle>
             <CardDescription>
-              Details about {contact.name} from {contact.company}
+              Details about {contact.name} from {contact.companies?.name || 'Unknown Company'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -52,17 +113,17 @@ export default function ContactDetailPage({
               <div className="flex items-center gap-2">
                 <User className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Role:</span>
-                <span className="text-sm">{contact.role}</span>
+                <span className="text-sm">{contact.role || 'Not specified'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Building className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Company:</span>
-                <span className="text-sm">{contact.company}</span>
+                <span className="text-sm">{contact.companies?.name || 'Not specified'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Briefcase className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Industry:</span>
-                <span className="text-sm">{contact.industry}</span>
+                <span className="text-sm">{contact.companies?.industry || 'Not specified'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4 text-muted-foreground" />
@@ -75,7 +136,7 @@ export default function ContactDetailPage({
                 <Phone className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">Phone:</span>
                 <a href={`tel:${contact.phone}`} className="text-sm text-primary hover:underline">
-                  {contact.phone}
+                  {contact.phone || 'Not available'}
                 </a>
               </div>
             </div>
@@ -83,18 +144,7 @@ export default function ContactDetailPage({
         </Card>
 
         <div className="md:col-span-2">
-          <Tabs defaultValue="meetings">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="meetings">Meetings</TabsTrigger>
-              <TabsTrigger value="notes">Notes</TabsTrigger>
-            </TabsList>
-            <TabsContent value="meetings">
-              <ContactMeetings contactId={contact.id} />
-            </TabsContent>
-            <TabsContent value="notes">
-              <ContactNotes contactId={contact.id} />
-            </TabsContent>
-          </Tabs>
+          <ContactMeetings contactId={contact.id} />
         </div>
       </div>
     </div>
