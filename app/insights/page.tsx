@@ -20,6 +20,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { format, formatDistanceToNow } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { exportInsightsToExcel } from "@/lib/utils"
 
 export default function InsightsPage() {
   const { user } = useAuth()
@@ -263,7 +264,11 @@ export default function InsightsPage() {
               </>
             )}
           </Button>
-          <Button variant="outline">
+          <Button 
+            variant="outline"
+            onClick={() => exportInsightsToExcel(filteredClusters)}
+            disabled={filteredClusters.length === 0 || analysisRunning}
+          >
             <Download className="mr-2 h-4 w-4" />
             Export Insights
           </Button>
