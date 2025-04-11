@@ -308,9 +308,12 @@ Don't direct user to transcription page.
 
 Let's show graph of meetings over time
 
+account infromation details are not being saved
 
 future directions:
 prep for call - prepare script
 salesops - follow up
 enrich company data from internet
 automaticlly research solutions (competitors) that address common pain points.
+
+
