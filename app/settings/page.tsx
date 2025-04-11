@@ -11,6 +11,11 @@ import { Save, Key, Download } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/lib/auth-context"
 import { saveOpenAIApiKey, getOpenAIApiKey } from "@/lib/supabase"
+import { exportContacts, exportMeetings, exportInsightsToExcel } from "@/lib/utils"
+import { getContacts } from "@/lib/services/contacts"
+import { getMeetings } from "@/lib/services/meetings"
+import { getAllPainPoints, getCommonPainPointsWithAI } from "@/lib/services/pain-points"
+import { supabase } from "@/lib/supabase"
 
 export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
@@ -23,6 +28,14 @@ export default function SettingsPage() {
   })
   const { toast } = useToast()
   const { user } = useAuth()
+  const [contacts, setContacts] = useState<any[]>([])
+  const [meetings, setMeetings] = useState<any[]>([])
+  const [painPoints, setPainPoints] = useState<any[]>([])
+  const [loading, setLoading] = useState({
+    contacts: false,
+    meetings: false,
+    insights: false
+  })
 
   useEffect(() => {
     // Load the user's OpenAI API key
@@ -35,6 +48,39 @@ export default function SettingsPage() {
     
     loadApiKey();
   }, [user]);
+
+  useEffect(() => {
+    async function loadExportData() {
+      try {
+        // Only load the data when it's needed for export
+        if (contacts.length === 0) {
+          setLoading(prev => ({ ...prev, contacts: true }))
+          const contactsData = await getContacts()
+          setContacts(contactsData)
+          setLoading(prev => ({ ...prev, contacts: false }))
+        }
+        
+        if (meetings.length === 0) {
+          setLoading(prev => ({ ...prev, meetings: true }))
+          const meetingsData = await getMeetings()
+          setMeetings(meetingsData)
+          setLoading(prev => ({ ...prev, meetings: false }))
+        }
+        
+        if (painPoints.length === 0) {
+          setLoading(prev => ({ ...prev, insights: true }))
+          const painPointsData = await getAllPainPoints()
+          setPainPoints(painPointsData)
+          setLoading(prev => ({ ...prev, insights: false }))
+        }
+      } catch (error) {
+        console.error("Error loading export data:", error)
+        setLoading({ contacts: false, meetings: false, insights: false })
+      }
+    }
+    
+    loadExportData()
+  }, [])
 
   const handleSettingChange = (setting: string, value: boolean) => {
     setSettings((prev) => ({ ...prev, [setting]: value }))
@@ -223,16 +269,108 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Button variant="outline" className="w-full">
-              <Download className="mr-2 h-4 w-4" />
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={async () => {
+                if (contacts.length === 0) {
+                  setLoading(prev => ({ ...prev, contacts: true }))
+                  const contactsData = await getContacts()
+                  setContacts(contactsData)
+                  setLoading(prev => ({ ...prev, contacts: false }))
+                }
+                exportContacts(contacts)
+              }}
+              disabled={loading.contacts}
+            >
+              {loading.contacts ? (
+                <span className="mr-2 h-4 w-4 animate-spin">⏳</span>
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
               Export Contacts
             </Button>
-            <Button variant="outline" className="w-full">
-              <Download className="mr-2 h-4 w-4" />
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={async () => {
+                try {
+                  setLoading(prev => ({ ...prev, meetings: true }))
+                  
+                  // Get meetings with transcripts and pain points included
+                  const { data, error } = await supabase
+                    .from('meetings')
+                    .select(`
+                      *,
+                      contacts (
+                        id,
+                        name,
+                        email,
+                        role
+                      ),
+                      companies (
+                        id,
+                        name,
+                        industry
+                      ),
+                      transcripts (id, content),
+                      pain_points (id, title, description, root_cause, impact, created_at)
+                    `)
+                    .order('date', { ascending: false });
+                    
+                  if (error) throw error;
+                  setMeetings(data || []);
+                  setLoading(prev => ({ ...prev, meetings: false }))
+                  exportMeetings(data || [])
+                } catch (error) {
+                  console.error("Error exporting meetings:", error)
+                  setLoading(prev => ({ ...prev, meetings: false }))
+                }
+              }}
+              disabled={loading.meetings}
+            >
+              {loading.meetings ? (
+                <span className="mr-2 h-4 w-4 animate-spin">⏳</span>
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
               Export Meetings
             </Button>
-            <Button variant="outline" className="w-full">
-              <Download className="mr-2 h-4 w-4" />
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={async () => {
+                try {
+                  setLoading(prev => ({ ...prev, insights: true }))
+                  // Get pain point clusters instead of raw pain points
+                  const result = await getCommonPainPointsWithAI(false)
+                  if (result && result.clusters && result.clusters.length > 0) {
+                    exportInsightsToExcel(result.clusters)
+                  } else {
+                    toast({
+                      variant: "destructive",
+                      title: "No data available",
+                      description: "No pain point clusters are available to export."
+                    })
+                  }
+                  setLoading(prev => ({ ...prev, insights: false }))
+                } catch (error) {
+                  console.error("Error exporting insights:", error)
+                  toast({
+                    variant: "destructive",
+                    title: "Export failed",
+                    description: "There was an error exporting the insights."
+                  })
+                  setLoading(prev => ({ ...prev, insights: false }))
+                }
+              }}
+              disabled={loading.insights}
+            >
+              {loading.insights ? (
+                <span className="mr-2 h-4 w-4 animate-spin">⏳</span>
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
               Export Insights
             </Button>
           </div>
