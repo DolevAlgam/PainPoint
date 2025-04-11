@@ -150,7 +150,7 @@ ${transcript}`
       },
       reasoning: { effort: "high" },
       tools: [],
-      store: flase
+      store: false
     });
 
     /**
