@@ -116,49 +116,6 @@ export async function deletePainPoint(id: string, meetingId: string) {
   }
 }
 
-export async function generatePainPointsFromTranscript(transcript: string, meetingId: string, userId: string) {
-  try {
-    // Get the user's OpenAI API key
-    const apiKey = await getOpenAIApiKey();
-    if (!apiKey) throw new Error('OpenAI API key not found');
-
-    // Analyze the transcript using OpenAI
-    const painPointsData = await analyzePainPoints(transcript, apiKey);
-
-    // Create pain points in the database
-    const painPoints = painPointsData.map((pp: any) => ({
-      meeting_id: meetingId,
-      title: pp.title,
-      description: pp.description,
-      root_cause: pp.rootCause,
-      impact: pp.impact,
-      user_id: userId,
-      citations: pp.citations || null
-    }));
-
-    const { data, error } = await supabase
-      .from('pain_points')
-      .insert(painPoints)
-      .select();
-
-    if (error) throw error;
-    
-    // Update the meeting
-    await supabase
-      .from('meetings')
-      .update({ 
-        has_analysis: true,
-        status: 'analyzed'
-      })
-      .eq('id', meetingId);
-      
-    return data;
-  } catch (error) {
-    console.error(`Error generating pain points for meeting ${meetingId}:`, error);
-    return null;
-  }
-}
-
 export async function getAllPainPoints() {
   console.log("🔍 PainPoints Service: getAllPainPoints called")
   try {

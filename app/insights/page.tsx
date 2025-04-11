@@ -11,7 +11,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, 
   Tooltip, Legend, ResponsiveContainer, Treemap
 } from "recharts"
-import { getAllPainPoints, getCommonPainPointsWithAI, getLastClusterAnalysisTime } from "@/lib/services/pain-points"
+import { getAllPainPoints, getLastClusterAnalysisTime } from "@/lib/services/pain-points"
 import { getCompanies } from "@/lib/services/companies"
 import { useAuth } from "@/lib/auth-context"
 import { Loader2, Search, Download, ArrowRight, ChevronDown, ChevronUp, X, RefreshCw, AlertTriangle, Calendar, Sparkles } from "lucide-react"
@@ -21,9 +21,12 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { format, formatDistanceToNow } from "date-fns"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { exportInsightsToExcel } from "@/lib/utils"
+import { supabase } from "@/lib/supabase"
+import { useToast } from "@/components/ui/use-toast"
 
 export default function InsightsPage() {
   const { user } = useAuth()
+  const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [allPainPoints, setAllPainPoints] = useState<any[]>([])
   const [commonPainPoints, setCommonPainPoints] = useState<any[]>([])
@@ -40,6 +43,8 @@ export default function InsightsPage() {
   const [needsRefresh, setNeedsRefresh] = useState(false)
   const [apiKeyMissing, setApiKeyMissing] = useState(false)
   const [clustersFetched, setClustersFetched] = useState(false)
+  const [analysisStatus, setAnalysisStatus] = useState<string | null>(null)
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null)
 
   // Colors for charts
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#8DD1E1', '#82ca9d', '#ffc658', '#8884d8', '#83a6ed']
@@ -62,8 +67,39 @@ export default function InsightsPage() {
           setAllPainPoints(painPointsData)
           setCompanies(companiesData)
           
-          // If we have a last analysis timestamp, clusters exist, so load them
-          if (lastAnalysisTimeData) {
+          // Check if there's an in-progress analysis from localStorage
+          const analysisInProgress = localStorage.getItem('pain_points_analysis_in_progress') === 'true'
+          
+          if (analysisInProgress) {
+            console.log("🔍 Insights: Analysis in progress detected from previous session")
+            setAnalysisRunning(true)
+            setAnalysisStatus('in_progress')
+            startPollingForResults()
+            
+            // If we also have last analysis data, load it as a fallback while waiting
+            if (lastAnalysisTimeData) {
+              setLastAnalysisTime(lastAnalysisTimeData)
+              // Load cached results but show "in progress" status
+              const { data: clusters } = await supabase
+                .from('pain_point_clusters')
+                .select('*')
+                .order('count', { ascending: false })
+                
+              if (clusters && clusters.length > 0) {
+                // Parse the examples JSON back to objects
+                const parsedClusters = clusters.map(cluster => ({
+                  ...cluster,
+                  examples: cluster.examples ? JSON.parse(cluster.examples) : []
+                }))
+                
+                setCommonPainPoints(parsedClusters)
+                setFilteredClusters(parsedClusters)
+                setClustersFetched(true)
+              }
+            }
+          } 
+          // If no analysis in progress but we have a last analysis timestamp, load clusters 
+          else if (lastAnalysisTimeData) {
             console.log("🔍 Insights: Last analysis time found, loading clusters automatically")
             setLastAnalysisTime(lastAnalysisTimeData)
             // Load the clusters without forcing a refresh
@@ -94,31 +130,215 @@ export default function InsightsPage() {
     
     setAnalysisRunning(true)
     setApiKeyMissing(false)
+    setAnalysisStatus('starting')
     
     try {
-      console.log("🔍 Insights: Calling getCommonPainPointsWithAI")
-      const result = await getCommonPainPointsWithAI(forceRefresh)
-      console.log(`🔍 Insights: Received clusters: ${result.clusters.length}`)
-      setCommonPainPoints(result.clusters)
-      setFilteredClusters(result.clusters)
-      setLastAnalysisTime(result.lastUpdated)
-      setNeedsRefresh(result.needsRefresh)
-      setClustersFetched(true)
-      console.log("🔍 Insights: State updated with clusters data")
+      // First check for cached results if not forcing refresh
+      if (!forceRefresh) {
+        const response = await fetch('/api/analyze-common-pain-points', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: user?.id,
+            forceRefresh: false
+          })
+        })
+        
+        const result = await response.json()
+        
+        if (!response.ok) {
+          if (response.status === 400 && result.error?.includes('OpenAI API key')) {
+            setApiKeyMissing(true)
+          }
+          throw new Error(result.error || 'Failed to get pain point clusters')
+        }
+        
+        // If we got cached results with no need to refresh, use them
+        if (result.clusters?.length > 0 && !result.needsRefresh) {
+          console.log(`🔍 Insights: Received cached clusters: ${result.clusters.length}`)
+          setCommonPainPoints(result.clusters)
+          setFilteredClusters(result.clusters)
+          setLastAnalysisTime(result.lastUpdated)
+          setNeedsRefresh(result.needsRefresh)
+          setClustersFetched(true)
+          setAnalysisRunning(false)
+          return
+        }
+        
+        // If we have cached results but need refresh and forceRefresh is false,
+        // still display the cached results but indicate refresh is needed
+        if (result.clusters?.length > 0 && result.needsRefresh && !forceRefresh) {
+          console.log(`🔍 Insights: Using stale cached clusters: ${result.clusters.length}`)
+          setCommonPainPoints(result.clusters)
+          setFilteredClusters(result.clusters)
+          setLastAnalysisTime(result.lastUpdated)
+          setNeedsRefresh(true)
+          setClustersFetched(true)
+          setAnalysisRunning(false)
+          return
+        }
+      }
+      
+      // Call the API to start the analysis
+      const response = await fetch('/api/analyze-common-pain-points', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user?.id,
+          forceRefresh: true
+        })
+      })
+      
+      const result = await response.json()
+      
+      if (!response.ok) {
+        if (response.status === 400 && result.error?.includes('OpenAI API key')) {
+          setApiKeyMissing(true)
+        }
+        throw new Error(result.error || 'Failed to start pain point analysis')
+      }
+      
+      // Analysis started successfully
+      toast({
+        title: "Analysis started",
+        description: "Come back in a minute to see the results. You can leave this page in the meantime."
+      })
+      
+      // Store analysis in progress status in localStorage so it persists across page loads
+      localStorage.setItem('pain_points_analysis_in_progress', 'true')
+      
+      // Start polling for results
+      setAnalysisStatus('in_progress')
+      startPollingForResults()
+      
     } catch (error) {
       console.error("❌ Error analyzing common pain points:", error)
       if (error instanceof Error && error.message.includes('OpenAI API key not found')) {
         setApiKeyMissing(true)
       }
-    } finally {
-      console.log("🔍 Insights: Analysis process finished")
+      setAnalysisStatus('failed')
       setAnalysisRunning(false)
+      
+      toast({
+        variant: "destructive",
+        title: "Analysis failed",
+        description: error instanceof Error ? error.message : "An error occurred"
+      })
     }
   }
   
+  // Function to poll for analysis results
+  const startPollingForResults = () => {
+    // Clear any existing polling interval
+    if (pollingInterval) {
+      clearInterval(pollingInterval)
+    }
+    
+    // Poll every 5 seconds
+    const intervalId = setInterval(async () => {
+      try {
+        // Check for cached results - fixed count query
+        const { data: clusters } = await supabase
+          .from('pain_point_clusters')
+          .select('id')
+        
+        // If we have results, get them
+        if (clusters && clusters.length > 0) {
+          // Get the last analysis time to check if it's recent
+          const { data: meta } = await supabase
+            .from('meta_data')
+            .select('value')
+            .eq('key', 'last_pain_point_analysis')
+            .maybeSingle()
+          
+          if (meta && meta.value) {
+            const lastAnalysisTime = new Date(meta.value)
+            const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
+            
+            // If analysis was done in the last 5 minutes, consider it complete
+            if (lastAnalysisTime > fiveMinutesAgo) {
+              // Get the actual clusters
+              const { data: fullClusters } = await supabase
+                .from('pain_point_clusters')
+                .select('*')
+                .order('count', { ascending: false })
+              
+              if (fullClusters && fullClusters.length > 0) {
+                // Parse the examples JSON back to objects
+                const parsedClusters = fullClusters.map(cluster => ({
+                  ...cluster,
+                  examples: cluster.examples ? JSON.parse(cluster.examples) : []
+                }))
+                
+                setCommonPainPoints(parsedClusters)
+                setFilteredClusters(parsedClusters)
+                setLastAnalysisTime(meta.value)
+                setNeedsRefresh(false)
+                setClustersFetched(true)
+                setAnalysisStatus('completed')
+                
+                // Clear the interval
+                clearInterval(intervalId)
+                setPollingInterval(null)
+                setAnalysisRunning(false)
+                
+                // Remove the localStorage flag
+                localStorage.removeItem('pain_points_analysis_in_progress')
+                
+                // Add a toast notification to inform the user
+                toast({
+                  title: "Analysis complete",
+                  description: "Pain points have been clustered and are ready to view"
+                })
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error polling for analysis results:', error)
+      }
+    }, 5000)
+    
+    // Store the interval ID for cleanup
+    setPollingInterval(intervalId)
+    
+    // Safety cleanup after 10 minutes
+    setTimeout(() => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval)
+        setPollingInterval(null)
+        setAnalysisRunning(false)
+        setAnalysisStatus('timeout')
+        
+        // Remove the localStorage flag
+        localStorage.removeItem('pain_points_analysis_in_progress')
+        
+        // Add these lines for timeout handling
+        toast({
+          variant: "destructive",
+          title: "Analysis timed out",
+          description: "The analysis is taking longer than expected. Please try again."
+        })
+      }
+    }, 10 * 60 * 1000)
+  }
+
+  // Cleanup interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval)
+      }
+    }
+  }, [pollingInterval])
+  
   useEffect(() => {
     // Apply filters to pain point clusters
-    if (commonPainPoints.length === 0) return;
+    if (commonPainPoints.length === 0) return
     
     let filtered = [...commonPainPoints]
     
@@ -167,33 +387,33 @@ export default function InsightsPage() {
   
   // Format a date for display
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return 'Never';
+    if (!dateString) return 'Never'
     try {
-      const date = new Date(dateString);
-      return format(date, 'MMM d, yyyy h:mm a');
+      const date = new Date(dateString)
+      return format(date, 'MMM d, yyyy h:mm a')
     } catch (e) {
-      return 'Invalid date';
+      return 'Invalid date'
     }
   }
   
   // Get relative time (e.g. "2 days ago")
   const getRelativeTime = (dateString: string | null) => {
-    if (!dateString) return 'Never';
+    if (!dateString) return 'Never'
     try {
-      const date = new Date(dateString);
-      return formatDistanceToNow(date, { addSuffix: true });
+      const date = new Date(dateString)
+      return formatDistanceToNow(date, { addSuffix: true })
     } catch (e) {
-      return 'Unknown';
+      return 'Unknown'
     }
   }
   
   // Prepare data for impact distribution chart
   const prepareImpactData = (cluster: any) => {
-    if (!cluster || !cluster.impact_summary) return [];
+    if (!cluster || !cluster.impact_summary) return []
     
     return Object.entries(cluster.impact_summary)
       .filter(([name, value]) => name !== 'Unknown' && (value as number) > 0)
-      .map(([name, value]) => ({ name, value }));
+      .map(([name, value]) => ({ name, value }))
   }
   
   // Prepare data for the treemap visualization
@@ -202,7 +422,7 @@ export default function InsightsPage() {
       name: cluster.cluster_name,
       size: cluster.count,
       color: COLORS[Math.floor(Math.random() * COLORS.length)]
-    }));
+    }))
   }
   
   // Get unique industries from all companies
@@ -245,7 +465,7 @@ export default function InsightsPage() {
             {analysisRunning ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Analyzing Pain Points...
+                {analysisStatus === 'starting' ? 'Starting Analysis...' : 'Analysis In Progress...'}
               </>
             ) : needsRefresh ? (
               <>
@@ -312,6 +532,26 @@ export default function InsightsPage() {
               AI-powered analysis of common pain points across all customer meetings
             </CardDescription>
             <div className="flex flex-wrap gap-2 mt-4">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search pain points..."
+                  className="pl-8"
+                  value={filters.searchQuery}
+                  onChange={(e) => handleFilterChange("searchQuery", e.target.value)}
+                />
+                {filters.searchQuery && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="absolute right-0 top-0 h-9 w-9 rounded-l-none p-0"
+                    onClick={() => handleFilterChange("searchQuery", "")}
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">Clear</span>
+                  </Button>
+                )}
+              </div>
               <div className="flex-1 min-w-[200px]">
                 <Select
                   value={filters.industry}
@@ -344,26 +584,6 @@ export default function InsightsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search pain points..."
-                  className="pl-8"
-                  value={filters.searchQuery}
-                  onChange={(e) => handleFilterChange("searchQuery", e.target.value)}
-                />
-                {filters.searchQuery && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="absolute right-0 top-0 h-9 w-9 rounded-l-none p-0"
-                    onClick={() => handleFilterChange("searchQuery", "")}
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Clear</span>
-                  </Button>
-                )}
-              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -371,10 +591,13 @@ export default function InsightsPage() {
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
                 <p className="text-center text-muted-foreground">
-                  Analyzing all pain points to identify common themes...
+                  {analysisStatus === 'starting' && 'Starting pain point analysis...'}
+                  {analysisStatus === 'in_progress' && 'Analyzing all pain points to identify common themes...'}
+                  {(!analysisStatus || analysisStatus === '') && 'Analyzing pain points...'}
                 </p>
                 <p className="text-center text-sm text-muted-foreground mt-2">
-                  This may take a minute as we're using advanced AI to cluster similar issues
+                  This may take a minute as we're using advanced AI to cluster similar issues.
+                  You can leave this page and come back later.
                 </p>
               </div>
             ) : apiKeyMissing ? (
@@ -426,139 +649,12 @@ export default function InsightsPage() {
                 <p>No pain point clusters match your filters. Try adjusting your criteria.</p>
               </div>
             ) : (
-              <Tabs defaultValue="visual">
+              <Tabs defaultValue="list">
                 <TabsList className="mb-4">
-                  <TabsTrigger value="visual">Visual View</TabsTrigger>
                   <TabsTrigger value="list">List View</TabsTrigger>
                   <TabsTrigger value="detail">Detail View</TabsTrigger>
+                  <TabsTrigger value="visual">Visual View</TabsTrigger>
                 </TabsList>
-                
-                <TabsContent value="visual" className="space-y-6">
-                  <div>
-                    <h3 className="font-medium mb-4">Pain Point Clusters by Size</h3>
-                    <div className="h-[400px] border rounded-md p-4">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <Treemap
-                          data={prepareTreemapData()}
-                          dataKey="size"
-                          aspectRatio={4/3}
-                          stroke="#fff"
-                          fill="#8884d8"
-                          onClick={(data) => {
-                            const cluster = filteredClusters.find(c => c.cluster_name === data.name);
-                            if (cluster) {
-                              setSelectedCluster(cluster);
-                            }
-                          }}
-                        >
-                          {prepareTreemapData().map((entry, index) => (
-                            <Cell 
-                              key={`cell-${index}`} 
-                              fill={entry.color} 
-                              cursor="pointer"
-                            />
-                          ))}
-                          <Tooltip 
-                            content={({ active, payload }) => {
-                              if (active && payload && payload.length) {
-                                return (
-                                  <div className="bg-background border rounded-md shadow-md p-3">
-                                    <p className="font-medium">{payload[0].payload.name}</p>
-                                    <p className="text-sm">{payload[0].value} mentions</p>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                        </Treemap>
-                      </ResponsiveContainer>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Click on any box to see details for that pain point cluster
-                    </p>
-                  </div>
-                  
-                  {selectedCluster && (
-                    <div className="border rounded-md p-4">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h3 className="text-lg font-medium">{selectedCluster.cluster_name}</h3>
-                          <p className="text-sm text-muted-foreground mt-1">{selectedCluster.description}</p>
-                        </div>
-                        <Badge className="ml-2">
-                          {selectedCluster.count} instances
-                        </Badge>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                        <div>
-                          <h4 className="text-sm font-medium mb-2">Impact Distribution</h4>
-                          <div className="h-[200px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <PieChart>
-                                <Pie
-                                  data={prepareImpactData(selectedCluster)}
-                                  cx="50%"
-                                  cy="50%"
-                                  labelLine={false}
-                                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                  outerRadius={80}
-                                  fill="#8884d8"
-                                  dataKey="value"
-                                >
-                                  {prepareImpactData(selectedCluster).map((entry, index) => (
-                                    <Cell 
-                                      key={`cell-${index}`} 
-                                      fill={
-                                        entry.name === 'High' ? '#ef4444' : 
-                                        entry.name === 'Medium' ? '#f97316' : 
-                                        '#3b82f6'
-                                      } 
-                                    />
-                                  ))}
-                                </Pie>
-                                <Tooltip />
-                              </PieChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                        
-                        <div>
-                          <h4 className="text-sm font-medium mb-2">Industries Affected</h4>
-                          <div className="flex flex-wrap gap-1">
-                            {selectedCluster.industries.map((industry: string, i: number) => (
-                              <Badge key={i} variant="outline" className="text-xs">
-                                {industry}
-                              </Badge>
-                            ))}
-                          </div>
-                          
-                          <h4 className="text-sm font-medium mt-4 mb-2">Companies Mentioning This</h4>
-                          <div className="flex flex-wrap gap-1">
-                            {selectedCluster.companies.map((company: string, i: number) => (
-                              <Badge key={i} variant="secondary" className="text-xs">
-                                {company}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="mt-4">
-                        <h4 className="text-sm font-medium mb-2">Example Pain Points</h4>
-                        <div className="space-y-2">
-                          {selectedCluster.examples && selectedCluster.examples.map((example: any, i: number) => (
-                            <div key={i} className="bg-muted/50 rounded-md p-3">
-                              <p className="font-medium text-sm">{example.title}</p>
-                              <p className="text-xs text-muted-foreground mt-1">{example.description}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </TabsContent>
                 
                 <TabsContent value="list" className="space-y-4">
                   {filteredClusters.map((cluster, index) => (
@@ -599,7 +695,11 @@ export default function InsightsPage() {
                 </TabsContent>
                 
                 <TabsContent value="detail">
-                  <Accordion type="single" collapsible className="space-y-4">
+                  <Accordion 
+                    type="multiple" 
+                    defaultValue={filteredClusters.map(cluster => cluster.cluster_name)}
+                    className="space-y-4"
+                  >
                     {filteredClusters.map((cluster, index) => (
                       <AccordionItem 
                         key={index} 
@@ -718,6 +818,133 @@ export default function InsightsPage() {
                       </AccordionItem>
                     ))}
                   </Accordion>
+                </TabsContent>
+                
+                <TabsContent value="visual" className="space-y-6">
+                  <div>
+                    <h3 className="font-medium mb-4">Pain Point Clusters by Size</h3>
+                    <div className="h-[400px] border rounded-md p-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <Treemap
+                          data={prepareTreemapData()}
+                          dataKey="size"
+                          aspectRatio={4/3}
+                          stroke="#fff"
+                          fill="#8884d8"
+                          onClick={(data) => {
+                            const cluster = filteredClusters.find(c => c.cluster_name === data.name)
+                            if (cluster) {
+                              setSelectedCluster(cluster)
+                            }
+                          }}
+                        >
+                          {prepareTreemapData().map((entry, index) => (
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={entry.color} 
+                              cursor="pointer"
+                            />
+                          ))}
+                          <Tooltip 
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                return (
+                                  <div className="bg-background border rounded-md shadow-md p-3">
+                                    <p className="font-medium">{payload[0].payload.name}</p>
+                                    <p className="text-sm">{payload[0].value} mentions</p>
+                                  </div>
+                                )
+                              }
+                              return null
+                            }}
+                          />
+                        </Treemap>
+                      </ResponsiveContainer>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Click on any box to see details for that pain point cluster
+                    </p>
+                  </div>
+                  
+                  {selectedCluster && (
+                    <div className="border rounded-md p-4">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h3 className="text-lg font-medium">{selectedCluster.cluster_name}</h3>
+                          <p className="text-sm text-muted-foreground mt-1">{selectedCluster.description}</p>
+                        </div>
+                        <Badge className="ml-2">
+                          {selectedCluster.count} instances
+                        </Badge>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <div>
+                          <h4 className="text-sm font-medium mb-2">Impact Distribution</h4>
+                          <div className="h-[200px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={prepareImpactData(selectedCluster)}
+                                  cx="50%"
+                                  cy="50%"
+                                  labelLine={false}
+                                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                  outerRadius={80}
+                                  fill="#8884d8"
+                                  dataKey="value"
+                                >
+                                  {prepareImpactData(selectedCluster).map((entry, index) => (
+                                    <Cell 
+                                      key={`cell-${index}`} 
+                                      fill={
+                                        entry.name === 'High' ? '#ef4444' : 
+                                        entry.name === 'Medium' ? '#f97316' : 
+                                        '#3b82f6'
+                                      } 
+                                    />
+                                  ))}
+                                </Pie>
+                                <Tooltip />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <h4 className="text-sm font-medium mb-2">Industries Affected</h4>
+                          <div className="flex flex-wrap gap-1">
+                            {selectedCluster.industries.map((industry: string, i: number) => (
+                              <Badge key={i} variant="outline" className="text-xs">
+                                {industry}
+                              </Badge>
+                            ))}
+                          </div>
+                          
+                          <h4 className="text-sm font-medium mt-4 mb-2">Companies Mentioning This</h4>
+                          <div className="flex flex-wrap gap-1">
+                            {selectedCluster.companies.map((company: string, i: number) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {company}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-4">
+                        <h4 className="text-sm font-medium mb-2">Example Pain Points</h4>
+                        <div className="space-y-2">
+                          {selectedCluster.examples && selectedCluster.examples.map((example: any, i: number) => (
+                            <div key={i} className="bg-muted/50 rounded-md p-3">
+                              <p className="font-medium text-sm">{example.title}</p>
+                              <p className="text-xs text-muted-foreground mt-1">{example.description}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
               </Tabs>
             )}

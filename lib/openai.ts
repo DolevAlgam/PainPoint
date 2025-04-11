@@ -94,8 +94,7 @@ async function transcribeSingleChunk(file: File, apiKey: string): Promise<string
 export async function analyzePainPoints(transcript: string, apiKey: string): Promise<any> {
   // 1. Initialize the OpenAI client
   const openai = new OpenAI({ 
-    apiKey,
-    dangerouslyAllowBrowser: true  // Allow usage in browser environments
+    apiKey
   });
 
   try {
@@ -137,7 +136,7 @@ For each pain point, provide:
 2. A full description of the pain point
 3. Direct transcript citations for the pain point (exact quotes)
 4. Root cause (ONLY if explicitly stated, otherwise indicate "Not explicitly mentioned")
-5. Impact level (ONLY if explicitly stated as High/Medium/Low, otherwise indicate "Not explicitly mentioned")
+5. Impact level (ONLY if Impact is referenced by ICP, and you can classify it as High/Medium/Low, otherwise indicate "Not explicitly mentioned")
 
 TRANSCRIPT:
 ${transcript}`
@@ -151,7 +150,7 @@ ${transcript}`
       },
       reasoning: { effort: "high" },
       tools: [],
-      store: false
+      store: flase
     });
 
     /**
@@ -389,8 +388,7 @@ export async function analyzeCommonPainPoints(painPoints: any[], apiKey: string)
   console.log(`🔍 OpenAI Service: analyzeCommonPainPoints called with ${painPoints.length} pain points`)
   // 1. Initialize the OpenAI client
   const openai = new OpenAI({ 
-    apiKey,
-    dangerouslyAllowBrowser: true
+    apiKey
   });
 
   try {

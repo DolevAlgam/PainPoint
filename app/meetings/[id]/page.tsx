@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { getMeeting, updateMeeting } from "@/lib/services/meetings"
 import { getRecordings, getRecording } from "@/lib/services/recordings"
 import { getTranscripts, generateTranscript } from "@/lib/services/transcripts"
-import { getPainPoints, generatePainPointsFromTranscript } from "@/lib/services/pain-points"
+import { getPainPoints } from "@/lib/services/pain-points"
 import { useAuth } from "@/lib/auth-context"
 import { useToast } from "@/components/ui/use-toast"
 import { format } from "date-fns"
@@ -20,6 +20,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { getRecordingURL } from "@/lib/services/recordings"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { supabase } from "@/lib/supabase"
+import { 
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger 
+} from "@/components/ui/tooltip"
 
 export default function MeetingDetailPage() {
   const params = useParams()
@@ -218,43 +224,114 @@ export default function MeetingDetailPage() {
     setTranscriptPollingInterval(intervalId);
   };
 
-  const handleAnalyzeTranscript = async (transcriptId: string) => {
-    if (!user || !meeting) return
-    
-    const transcript = transcripts.find(t => t.id === transcriptId)
-    if (!transcript) return
-    
-    setIsAnalyzingTranscript(true)
+  // Add this function to poll for analysis status
+  const checkAnalysisStatus = async () => {
+    if (!meeting) return;
     
     try {
-      const painPointsData = await generatePainPointsFromTranscript(transcript.content, meeting.id, user.id)
+      const { data: updatedMeeting, error } = await supabase
+        .from('meetings')
+        .select('*')
+        .eq('id', meeting.id)
+        .single();
+        
+      if (error) throw error;
       
-      if (painPointsData) {
-        setPainPoints([...painPointsData, ...painPoints])
+      if (updatedMeeting) {
+        // Update meeting state
+        setMeeting(updatedMeeting);
         
-        // Update meeting
-        if (meeting) {
-          setMeeting({ ...meeting, has_analysis: true, status: 'analyzed' })
+        // If analysis is completed, refresh pain points
+        if (updatedMeeting.analysis_status === 'completed') {
+          const updatedPainPoints = await getPainPoints(meeting.id);
+          setPainPoints(updatedPainPoints);
+          
+          toast({
+            title: "Analysis complete",
+            description: "Pain points have been extracted from your transcript"
+          });
+          
+          // Stop polling
+          return true;
+        } 
+        // If analysis failed, show error
+        else if (updatedMeeting.analysis_status === 'failed') {
+          toast({
+            variant: "destructive",
+            title: "Analysis failed",
+            description: updatedMeeting.analysis_error || "An error occurred during analysis"
+          });
+          
+          // Stop polling
+          return true;
         }
-        
-        toast({
-          title: "Analysis complete",
-          description: "Pain points have been extracted from your transcript"
-        })
-        
-        // Switch to pain points tab
-        setCurrentTab("painpoints")
       }
+      
+      // Continue polling
+      return false;
+    } catch (error) {
+      console.error("Error checking analysis status:", error);
+      // Continue polling even on error
+      return false;
+    }
+  };
+
+  const handleAnalyzeTranscript = async (transcriptId: string) => {
+    if (!user || !meeting) return;
+    
+    setIsAnalyzingTranscript(true);
+    
+    try {
+      // Call the backend API endpoint
+      const response = await fetch('/api/analyze-transcript', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transcriptId,
+          meetingId: meeting.id,
+          userId: user.id
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to analyze transcript');
+      }
+      
+      // Analysis started successfully
+      toast({
+        title: "Analysis started",
+        description: "Your transcript is being analyzed. This may take a minute."
+      });
+      
+      // Switch to pain points tab to show status
+      setCurrentTab("painpoints");
+      
+      // Stop showing the loading spinner on the button
+      setIsAnalyzingTranscript(false);
+      
+      // Start polling for completion (every 5 seconds)
+      const pollInterval = setInterval(async () => {
+        const isComplete = await checkAnalysisStatus();
+        if (isComplete) {
+          clearInterval(pollInterval);
+        }
+      }, 5000);
+      
+      // Clear interval after 10 minutes maximum (safety cleanup)
+      setTimeout(() => clearInterval(pollInterval), 10 * 60 * 1000);
     } catch (error: any) {
       toast({
         variant: "destructive",
-        title: "Error analyzing transcript",
+        title: "Error starting analysis",
         description: error.message || "An error occurred"
-      })
-    } finally {
-      setIsAnalyzingTranscript(false)
+      });
+      setIsAnalyzingTranscript(false);
     }
-  }
+  };
 
   const playRecording = async (recordingId: string) => {
     const recording = recordings.find(r => r.id === recordingId)
@@ -525,11 +602,24 @@ export default function MeetingDetailPage() {
               <TabsContent value="painpoints" className="mt-6">
                 {painPoints.length === 0 ? (
                   <div className="text-center py-10">
-                    <BrainCircuit className="mx-auto h-12 w-12 text-muted-foreground" />
-                    <h3 className="mt-4 text-lg font-medium">No Pain Points Identified</h3>
-                    <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
-                      Generate a transcript and analyze it to identify pain points.
-                    </p>
+                    {meeting.analysis_status === 'in_progress' ? (
+                      <>
+                        <Loader2 className="mx-auto h-12 w-12 animate-spin text-muted-foreground" />
+                        <h3 className="mt-4 text-lg font-medium">Analysis in Progress</h3>
+                        <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
+                          Your transcript is being analyzed to identify pain points. 
+                          This may take a minute. You can leave this page and come back later.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <BrainCircuit className="mx-auto h-12 w-12 text-muted-foreground" />
+                        <h3 className="mt-4 text-lg font-medium">No Pain Points Identified</h3>
+                        <p className="mt-2 text-sm text-muted-foreground max-w-md mx-auto">
+                          Generate a transcript and analyze it to identify pain points.
+                        </p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-6">
@@ -540,17 +630,26 @@ export default function MeetingDetailPage() {
                           <CardHeader className="pb-2">
                             <div className="flex justify-between items-center">
                               <CardTitle>{painPoint.title}</CardTitle>
-                              <Badge className={
-                                painPoint.impact === "High" 
-                                  ? "bg-red-50 text-red-700 border-red-200" 
-                                  : painPoint.impact === "Medium"
-                                    ? "bg-amber-50 text-amber-700 border-amber-200"
-                                    : painPoint.impact === "Low"
-                                      ? "bg-blue-50 text-blue-700 border-blue-200"
-                                      : "bg-gray-50 text-gray-700 border-gray-200"
-                              }>
-                                {painPoint.impact}
-                              </Badge>
+                              <TooltipProvider>
+                                <Tooltip delayDuration={100}>
+                                  <TooltipTrigger asChild>
+                                    <Badge className={
+                                      painPoint.impact === "High" 
+                                        ? "bg-red-50 text-red-700 border-red-200" 
+                                        : painPoint.impact === "Medium"
+                                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                                          : painPoint.impact === "Low"
+                                            ? "bg-blue-50 text-blue-700 border-blue-200"
+                                            : "bg-gray-50 text-gray-700 border-gray-200"
+                                    }>
+                                      {painPoint.impact}
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Impact</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
                             </div>
                           </CardHeader>
                           <CardContent className="pt-0 space-y-4">
