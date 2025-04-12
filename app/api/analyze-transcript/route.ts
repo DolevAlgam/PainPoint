@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { analyzePainPoints } from '@/lib/openai';
 import { createClient } from '@supabase/supabase-js';
-import { getOpenAIApiKey } from '@/lib/supabase';
+import AWS from 'aws-sdk';
 
 // Create a Supabase client with the service role key for admin access
-// This bypasses RLS policies
 const adminSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
+
+// Configure AWS SDK
+const sqs = new AWS.SQS({
+  region: process.env.AWS_REGION || 'us-west-2',
+  credentials: new AWS.Credentials({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  }),
+});
+
+const ANALYZE_TRANSCRIPT_QUEUE_URL = process.env.ANALYZE_TRANSCRIPT_QUEUE_URL || '';
 
 export async function POST(req: NextRequest) {
   try {
@@ -69,95 +78,51 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', meetingId);
 
+    // Send message to SQS queue
+    console.log('Sending message to SQS queue for background processing');
+    
+    // Check if queue URL is configured
+    if (!ANALYZE_TRANSCRIPT_QUEUE_URL) {
+      console.error('ANALYZE_TRANSCRIPT_QUEUE_URL environment variable is not set');
+      
+      // Return success but log the error
+      return NextResponse.json({
+        success: true,
+        message: 'Analysis started (without SQS)',
+        status: 'in_progress'
+      });
+    }
+    
+    const sqsParams = {
+      QueueUrl: ANALYZE_TRANSCRIPT_QUEUE_URL,
+      MessageBody: JSON.stringify({
+        transcriptId,
+        meetingId,
+        userId
+      }),
+      MessageDeduplicationId: `analyze-transcript-${meetingId}-${transcriptId}-${Date.now()}`,
+      MessageGroupId: `analyze-transcript-${meetingId}`
+    };
+    
+    try {
+      const sqsResponse = await sqs.sendMessage(sqsParams).promise();
+      console.log('Successfully sent message to SQS queue:', sqsResponse.MessageId);
+    } catch (sqsError: any) {
+      console.error('Error sending message to SQS queue:', sqsError);
+      // Continue even if SQS fails - the analysis_status is already set
+    }
+
     // Return immediately to acknowledge receipt of the request
-    const response = NextResponse.json({
+    return NextResponse.json({
       success: true,
       message: 'Analysis started',
       status: 'in_progress'
     });
-
-    // Process in the background
-    const apiKey = userSettings.openai_api_key;
-    processAnalysisInBackground(transcript.content, meetingId, userId, apiKey);
-
-    return response;
   } catch (error: any) {
     console.error('Transcript analysis error:', error);
     return NextResponse.json(
       { error: error.message || 'An error occurred processing the request' },
       { status: 500 }
     );
-  }
-}
-
-// This function runs in the background after the API has responded
-async function processAnalysisInBackground(
-  transcriptContent: string,
-  meetingId: string,
-  userId: string,
-  apiKey: string
-): Promise<void> {
-  try {
-    // Analyze the transcript using OpenAI
-    const painPointsData = await analyzePainPoints(transcriptContent, apiKey);
-
-    // First, delete all existing pain points for this meeting
-    const { error: deleteError } = await adminSupabase
-      .from('pain_points')
-      .delete()
-      .eq('meeting_id', meetingId);
-
-    if (deleteError) {
-      console.error('Error deleting existing pain points:', deleteError);
-      throw new Error(`Failed to delete existing pain points: ${deleteError.message}`);
-    }
-
-    // Create pain points in the database
-    const painPoints = painPointsData.map((pp: any) => ({
-      meeting_id: meetingId,
-      title: pp.title,
-      description: pp.description,
-      root_cause: pp.rootCause,
-      impact: pp.impact,
-      user_id: userId,
-      citations: pp.citations || null
-    }));
-
-    const { error: createError } = await adminSupabase
-      .from('pain_points')
-      .insert(painPoints);
-
-    if (createError) {
-      console.error('Error creating pain points:', createError);
-      await adminSupabase
-        .from('meetings')
-        .update({ 
-          analysis_status: 'failed',
-          analysis_error: createError.message
-        })
-        .eq('id', meetingId);
-      return;
-    }
-    
-    // Update the meeting status
-    await adminSupabase
-      .from('meetings')
-      .update({ 
-        has_analysis: true,
-        status: 'analyzed',
-        analysis_status: 'completed',
-        analysis_outdated: false
-      })
-      .eq('id', meetingId);
-  } catch (error: any) {
-    console.error('Background analysis error:', error);
-    // Update the meeting to show analysis failed
-    await adminSupabase
-      .from('meetings')
-      .update({ 
-        analysis_status: 'failed',
-        analysis_error: error.message
-      })
-      .eq('id', meetingId);
   }
 } 

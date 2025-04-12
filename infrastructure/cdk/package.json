@@ -1,0 +1,22 @@
+{
+  "name": "painpoint-lambda-infrastructure",
+  "version": "0.1.0",
+  "bin": {
+    "cdk": "bin/cdk.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "aws-cdk": "^2.80.0",
+    "typescript": "~5.0.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.80.0",
+    "constructs": "^10.0.0",
+    "dotenv": "^16.0.3"
+  }
+} 

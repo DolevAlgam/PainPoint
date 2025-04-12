@@ -1,0 +1,79 @@
+name: Deploy Lambda Functions and Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lambda/**'
+      - 'infrastructure/**'
+      - '.github/workflows/deploy-lambda.yml'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install AWS CLI
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Build Lambda functions
+      - name: Build transcribe Lambda
+        working-directory: ./lambda/transcribe
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build analyze-transcript Lambda
+        working-directory: ./lambda/analyze-transcript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build analyze-common-pain-points Lambda
+        working-directory: ./lambda/analyze-common-pain-points
+        run: |
+          npm ci
+          npm run build
+
+      # Deploy CDK infrastructure
+      - name: Deploy CDK infrastructure
+        working-directory: ./infrastructure/cdk
+        run: |
+          npm ci
+          npm run build
+          npx cdk deploy --require-approval never
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      # Output SQS Queue URLs
+      - name: Get SQS Queue URLs
+        id: get-queue-urls
+        run: |
+          aws cloudformation describe-stacks --stack-name PainpointLambdaStack --query "Stacks[0].Outputs" --output json > queue-outputs.json
+          echo "Queue URLs have been retrieved. Add these to your Vercel environment variables." 
