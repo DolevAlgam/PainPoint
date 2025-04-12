@@ -80,6 +80,48 @@ pnpm dev
 6. Analyze conversations to extract pain points
 7. View insights across multiple meetings
 
+## AWS Lambda Setup
+
+This application uses AWS Lambda for resource-intensive operations:
+
+1. **Transcribe API**: Transcription of audio recordings
+2. **Analyze Transcript API**: Analysis of transcriptions to identify pain points
+3. **Analyze Common Pain Points API**: Aggregation of pain points across meetings
+
+### Infrastructure Setup
+
+1. Set up AWS credentials as GitHub secrets:
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
+
+2. Also add Supabase secrets:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+
+3. Push changes to trigger GitHub workflow or run manually.
+
+4. Add the deployed SQS queue URLs to your Vercel environment variables:
+   - `TRANSCRIBE_QUEUE_URL`
+   - `ANALYZE_TRANSCRIPT_QUEUE_URL`
+   - `ANALYZE_PAIN_POINTS_QUEUE_URL`
+
+### Local Development
+
+To develop and test locally:
+
+```bash
+# Install AWS SDK
+npm install aws-sdk --save
+
+# Set up environment variables
+export AWS_ACCESS_KEY_ID=your_key
+export AWS_SECRET_ACCESS_KEY=your_secret
+export AWS_REGION=us-west-2
+export TRANSCRIBE_QUEUE_URL=https://sqs.us-west-2.amazonaws.com/...
+export ANALYZE_TRANSCRIPT_QUEUE_URL=https://sqs.us-west-2.amazonaws.com/...
+export ANALYZE_PAIN_POINTS_QUEUE_URL=https://sqs.us-west-2.amazonaws.com/...
+```
+
 ## License
 
 MIT 

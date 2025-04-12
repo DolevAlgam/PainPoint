@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FileText } from "lucide-react"
 import Link from "next/link"
+import { format } from "date-fns"
 
 interface Analysis {
   id: string;
@@ -32,7 +33,7 @@ export function RecentAnalysis({ analysis }: RecentAnalysisProps) {
                   <p className="font-medium leading-none">{item.contactName}</p>
                   <p className="text-sm text-muted-foreground">{item.company}</p>
                   <div className="flex items-center text-xs text-muted-foreground">
-                    <span className="mr-2">{item.date}</span>
+                    <span className="mr-2">{format(new Date(item.date), "PP")}</span>
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                       {item.painPoints} pain points
                     </span>

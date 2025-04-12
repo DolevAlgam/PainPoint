@@ -1,57 +1,62 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { getUpcomingMeetings } from "@/lib/services/meetings"
+import { useEffect, useState } from "react"
 import { Calendar, Clock } from "lucide-react"
 import Link from "next/link"
+import { format } from "date-fns"
 
-interface Meeting {
-  id: string;
-  date: string;
-  time: string;
-  contacts: {
-    name: string;
-  };
-  companies: {
-    name: string;
-  };
-}
+export function UpcomingMeetings() {
+  const [meetings, setMeetings] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
-interface UpcomingMeetingsProps {
-  meetings: Meeting[];
-}
+  useEffect(() => {
+    const fetchUpcomingMeetings = async () => {
+      try {
+        const data = await getUpcomingMeetings()
+        setMeetings(data.slice(0, 5))
+      } catch (error) {
+        console.error("Error fetching upcoming meetings:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
 
-export function UpcomingMeetings({ meetings }: UpcomingMeetingsProps) {
+    fetchUpcomingMeetings()
+  }, [])
+
   return (
-    <Card className="col-span-1">
+    <Card>
       <CardHeader>
         <CardTitle>Upcoming Meetings</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {meetings.map((meeting) => {
-            const meetingDate = new Date(`${meeting.date}T${meeting.time}`);
-            return (
-              <Link key={meeting.id} href={`/meetings/${meeting.id}`} className="block">
-                <div className="flex items-start space-x-3 rounded-md border p-3 transition-colors hover:bg-muted">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
-                    <Calendar className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="font-medium leading-none">{meeting.contacts?.name}</p>
-                    <p className="text-sm text-muted-foreground">{meeting.companies?.name}</p>
-                    <div className="flex items-center text-xs text-muted-foreground">
-                      <Clock className="mr-1 h-3 w-3" />
-                      {meetingDate.toLocaleDateString()} at{" "}
-                      {meetingDate.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+        {meetings.length > 0 ? (
+          <div className="space-y-4">
+            {meetings.map((meeting) => {
+              const meetingDate = new Date(`${meeting.date}T${meeting.time}`);
+              return (
+                <Link key={meeting.id} href={`/meetings/${meeting.id}`}>
+                  <div className="flex items-center space-x-4 rounded-md border p-4 transition-all hover:bg-accent">
+                    <div className="flex-shrink-0 rounded-md bg-primary/10 p-1">
+                      <Calendar className="h-6 w-6 text-primary" />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <p className="font-medium leading-none">{meeting.contacts?.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {format(meetingDate, "PPP")} at{" "}
+                        {format(meetingDate, "h:mm a")}
+                      </p>
                     </div>
                   </div>
-                </div>
-              </Link>
-            )
-          })}
-          {meetings.length === 0 && <p className="text-sm text-muted-foreground">No upcoming meetings scheduled.</p>}
-        </div>
+                </Link>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="flex h-[150px] items-center justify-center text-muted-foreground">
+            {loading ? "Loading..." : "No upcoming meetings scheduled."}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

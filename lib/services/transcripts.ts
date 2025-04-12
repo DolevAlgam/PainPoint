@@ -117,59 +117,71 @@ export async function deleteTranscript(id: string, meetingId: string) {
 
 export async function generateTranscript(recordingId: string, meetingId: string, userId: string) {
   try {
-    // Get the recording
-    const { data: recording, error: recordingError } = await supabase
+    // First verify the recording exists in the database
+    const { data: recordingCheck, error: checkError } = await supabase
       .from('recordings')
-      .select('*')
-      .eq('id', recordingId)
-      .single();
-
-    if (recordingError) throw recordingError;
-    if (!recording) throw new Error(`Recording with id ${recordingId} not found`);
-
-    // Get the recording URL
-    const recordingUrl = await getRecordingURL(recording.file_path);
-    if (!recordingUrl) throw new Error(`Could not get URL for recording ${recordingId}`);
-
-    // Get the user's OpenAI API key
-    const apiKey = await getOpenAIApiKey();
-    if (!apiKey) throw new Error('OpenAI API key not found');
-
-    // Download the file
-    const response = await fetch(recordingUrl);
-    if (!response.ok) throw new Error('Failed to download recording file');
+      .select('id, file_name')
+      .eq('id', recordingId);
+      
+    if (checkError) {
+      console.error('Error checking recording existence:', checkError);
+      throw new Error(`Database error when checking recording: ${checkError.message}`);
+    }
     
-    const blob = await response.blob();
-    const file = new File([blob], recording.file_name, { type: blob.type });
-
-    // Transcribe the file using OpenAI
-    const transcriptionText = await transcribeAudio(file, apiKey);
-
-    // Create the transcript
-    const transcript: NewTranscript = {
-      meeting_id: meetingId,
-      recording_id: recordingId,
-      content: transcriptionText,
-      user_id: userId
-    };
-
-    const { data, error } = await supabase
-      .from('transcripts')
-      .insert(transcript)
-      .select()
-      .single();
-
-    if (error) throw error;
+    if (!recordingCheck || recordingCheck.length === 0) {
+      throw new Error(`Recording with ID ${recordingId} not found in database`);
+    }
     
-    // Update the meeting
+    // Reset outdated flags first, regardless of whether the transcription succeeds
     await supabase
       .from('meetings')
-      .update({ 
-        has_transcript: true 
+      .update({
+        transcript_outdated: false,
+        analysis_outdated: true // Mark analysis as outdated if a new transcript is generated
       })
       .eq('id', meetingId);
+    
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        recordingId,
+        meetingId,
+        userId
+      }),
+    });
+    
+    const responseText = await response.text();
+    
+    let data;
+    try {
+      // Convert the response text back to JSON
+      data = JSON.parse(responseText);
+    } catch (e) {
+      console.error('Failed to parse response JSON:', e);
+      throw new Error(`Invalid JSON response: ${responseText}`);
+    }
+    
+    if (!response.ok) {
+      console.error('Transcription request failed:', data);
+      throw new Error(`Transcription request failed: ${data.error || response.statusText}`);
+    }
+    
+    // Return the initial transcript record
+    const { data: transcript, error } = await supabase
+      .from('transcripts')
+      .select('*')
+      .eq('id', data.transcriptId)
+      .single();
       
-    return data;
+    if (error) {
+      console.error('Error fetching transcript:', error);
+      throw error;
+    }
+    
+    return transcript;
   } catch (error) {
     console.error(`Error generating transcript for recording ${recordingId}:`, error);
     // Rethrow the error so it can be handled by the caller

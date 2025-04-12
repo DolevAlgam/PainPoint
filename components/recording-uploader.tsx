@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,7 +8,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { FileAudio, X, Upload } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
-import { uploadRecordingFile, createRecording } from "@/lib/services/recordings"
+import { uploadRecordingFile, createRecording, getRecordings } from "@/lib/services/recordings"
 import { useAuth } from "@/lib/auth-context"
 
 interface RecordingUploaderProps {
@@ -22,14 +22,29 @@ export default function RecordingUploader({ meetingId, onUploadComplete, onCance
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState("")
+  const [hasExistingRecording, setHasExistingRecording] = useState(false)
   const { user } = useAuth()
+
+  useEffect(() => {
+    // Check if the meeting already has recordings
+    async function checkExistingRecordings() {
+      try {
+        const recordings = await getRecordings(meetingId)
+        setHasExistingRecording(recordings.length > 0)
+      } catch (error) {
+        console.error('Error checking for existing recordings:', error)
+      }
+    }
+    
+    checkExistingRecordings()
+  }, [meetingId])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      // Check file size (25MB limit)
-      if (file.size > 25 * 1024 * 1024) {
-        setUploadError("File size exceeds 25MB limit")
+      // Check file size (100MB limit)
+      if (file.size > 100 * 1024 * 1024) {
+        setUploadError("File size exceeds 100MB limit")
         return
       }
 
@@ -117,6 +132,15 @@ export default function RecordingUploader({ meetingId, onUploadComplete, onCance
         <CardTitle className="text-lg">Upload Recording</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {hasExistingRecording && (
+          <Alert>
+            <AlertTitle>Note</AlertTitle>
+            <AlertDescription>
+              This meeting already has a recording. Uploading a new recording will replace the existing one.
+            </AlertDescription>
+          </Alert>
+        )}
+        
         <div className="space-y-2">
           <Label htmlFor="file">Recording File</Label>
           <div className="flex items-center gap-2">
@@ -173,7 +197,7 @@ export default function RecordingUploader({ meetingId, onUploadComplete, onCance
         <div className="rounded-md border p-3 bg-muted/50">
           <h4 className="text-xs font-medium mb-1">Supported Formats</h4>
           <p className="text-xs text-muted-foreground">MP3, MP4, MPEG, MPGA, M4A, WAV, WEBM, OGG, FLAC</p>
-          <p className="text-xs text-muted-foreground mt-1">Maximum size: 25MB</p>
+          <p className="text-xs text-muted-foreground mt-1">Maximum size: 100MB</p>
         </div>
       </CardContent>
       <CardFooter className="justify-between">

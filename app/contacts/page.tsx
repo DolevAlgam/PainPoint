@@ -12,6 +12,7 @@ import { getContacts, type Contact } from "@/lib/services/contacts"
 import { useAuth } from "@/lib/auth-context"
 import { getRoles, type Role } from "@/lib/services/contacts"
 import { getIndustries, type Industry } from "@/lib/services/companies"
+import { format } from "date-fns"
 
 // Extending the Contact type to include the joined companies data
 interface ContactWithCompany extends Contact {
@@ -134,27 +135,31 @@ export default function ContactsPage() {
                   <TableHead>Role</TableHead>
                   <TableHead>Industry</TableHead>
                   <TableHead>Last Interaction</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {contacts.map((contact) => (
                   <TableRow key={contact.id}>
                     <TableCell className="font-medium">
-                      <Link href={`/contacts/${contact.id}`} className="hover:underline">
-                        {contact.name}
-                      </Link>
+                      {contact.name}
                     </TableCell>
                     <TableCell>{contact.companies?.name}</TableCell>
                     <TableCell>{contact.role}</TableCell>
                     <TableCell>{contact.companies?.industry}</TableCell>
                     <TableCell>
-                      {new Date(contact.created_at).toISOString().split('T')[0]}
+                      {format(new Date(contact.created_at), "PP")}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`/contacts/${contact.id}`}>View</Link>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
                 {contacts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
+                    <TableCell colSpan={6} className="h-24 text-center">
                       No contacts found. Add your first contact to get started.
                     </TableCell>
                   </TableRow>

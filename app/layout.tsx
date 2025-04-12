@@ -7,6 +7,7 @@ import Navbar from "@/components/navbar"
 import { AuthProvider } from "@/lib/auth-context"
 import RouteGuard from "@/components/route-guard"
 import { Toaster } from "@/components/ui/toaster"
+import { FeedbackButton } from "@/components/feedback-button"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -34,6 +35,7 @@ export default function RootLayout({
                   <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
                 </div>
               </div>
+              <FeedbackButton />
               <Toaster />
             </ThemeProvider>
           </RouteGuard>

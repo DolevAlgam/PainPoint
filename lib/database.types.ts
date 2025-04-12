@@ -76,6 +76,8 @@ export interface Database {
           has_recording: boolean
           has_transcript: boolean
           has_analysis: boolean
+          transcript_outdated: boolean
+          analysis_outdated: boolean
           created_at: string
           user_id: string
         }
@@ -90,6 +92,8 @@ export interface Database {
           has_recording?: boolean
           has_transcript?: boolean
           has_analysis?: boolean
+          transcript_outdated?: boolean
+          analysis_outdated?: boolean
           created_at?: string
           user_id: string
         }
@@ -104,6 +108,8 @@ export interface Database {
           has_recording?: boolean
           has_transcript?: boolean
           has_analysis?: boolean
+          transcript_outdated?: boolean
+          analysis_outdated?: boolean
           created_at?: string
           user_id?: string
         }
@@ -236,6 +242,67 @@ export interface Database {
           name?: string
           created_at?: string
           user_id?: string
+        }
+      }
+      pain_point_clusters: {
+        Row: {
+          id: string
+          cluster_name: string
+          description: string | null
+          count: number
+          pain_point_ids: string[]
+          impact_summary: Json | null
+          industries: string[]
+          companies: string[]
+          examples: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          cluster_name: string
+          description?: string | null
+          count?: number
+          pain_point_ids?: string[]
+          impact_summary?: Json | null
+          industries?: string[]
+          companies?: string[]
+          examples?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          cluster_name?: string
+          description?: string | null
+          count?: number
+          pain_point_ids?: string[]
+          impact_summary?: Json | null
+          industries?: string[]
+          companies?: string[]
+          examples?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      meta_data: {
+        Row: {
+          key: string
+          value: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          key: string
+          value: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          key?: string
+          value?: string
+          created_at?: string
+          updated_at?: string
         }
       }
     }

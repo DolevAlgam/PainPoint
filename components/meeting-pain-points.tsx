@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
-import { BarChart2, Plus, Save, Trash2 } from "lucide-react"
+import { BarChart2, Plus, Save, Trash2, Download } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { exportMeetingPainPoints } from "@/lib/utils"
 
 export function MeetingPainPoints({ meetingId }: { meetingId: string }) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -274,7 +275,13 @@ export function MeetingPainPoints({ meetingId }: { meetingId: string }) {
       </CardContent>
       {painPoints.length > 0 && (
         <CardFooter className="flex justify-between">
-          <Button variant="outline">Export Pain Points</Button>
+          <Button 
+            variant="outline" 
+            onClick={() => exportMeetingPainPoints(painPoints, `Meeting-${meetingId}`)}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export Pain Points
+          </Button>
           <Button onClick={analyzePainPoints} disabled={isAnalyzing}>
             <BarChart2 className="mr-2 h-4 w-4" />
             {isAnalyzing ? "Reanalyzing..." : "Reanalyze Transcript"}

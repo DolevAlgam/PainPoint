@@ -1,0 +1,19 @@
+{
+  "name": "painpoint-analyze-common-pain-points-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function for analyzing common pain points",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.10.0",
+    "aws-sdk": "^2.1333.0",
+    "openai": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.114",
+    "@types/node": "^18.15.3",
+    "typescript": "^5.0.2"
+  }
+} 

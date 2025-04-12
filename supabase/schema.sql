@@ -92,6 +92,39 @@ CREATE TABLE IF NOT EXISTS roles (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
+-- Pain Point Clusters table (for AI-generated clusters)
+CREATE TABLE IF NOT EXISTS pain_point_clusters (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  cluster_name TEXT NOT NULL,
+  description TEXT,
+  count INTEGER NOT NULL DEFAULT 0,
+  pain_point_ids TEXT[] NOT NULL DEFAULT '{}',
+  impact_summary JSONB,
+  industries TEXT[] NOT NULL DEFAULT '{}',
+  companies TEXT[] NOT NULL DEFAULT '{}',
+  examples TEXT, -- Serialized JSON of example pain points
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Meta Data table (for system-wide settings and timestamps)
+CREATE TABLE IF NOT EXISTS meta_data (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User Settings table (for user-specific settings)
+CREATE TABLE IF NOT EXISTS user_settings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  openai_api_key TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id)
+);
+
 -- Create a function to add default data for new users
 CREATE OR REPLACE FUNCTION add_default_data_for_new_user()
 RETURNS TRIGGER AS $$
@@ -193,6 +226,9 @@ ALTER TABLE transcripts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pain_points ENABLE ROW LEVEL SECURITY;
 ALTER TABLE industries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pain_point_clusters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE meta_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
 
 -- Create policies for each table
 
@@ -248,4 +284,45 @@ CREATE POLICY roles_insert ON roles FOR INSERT WITH CHECK (auth.uid() = user_id)
 ALTER TABLE roles DROP CONSTRAINT IF EXISTS roles_name_key;
 ALTER TABLE roles ADD CONSTRAINT roles_name_user_id_key UNIQUE (name, user_id);
 CREATE POLICY roles_update ON roles FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY roles_delete ON roles FOR DELETE USING (auth.uid() = user_id); 
+CREATE POLICY roles_delete ON roles FOR DELETE USING (auth.uid() = user_id);
+
+-- Pain Point Clusters policies
+CREATE POLICY pain_point_clusters_select ON pain_point_clusters FOR SELECT USING (true);
+CREATE POLICY pain_point_clusters_insert ON pain_point_clusters FOR INSERT WITH CHECK (true);
+CREATE POLICY pain_point_clusters_update ON pain_point_clusters FOR UPDATE USING (true);
+CREATE POLICY pain_point_clusters_delete ON pain_point_clusters FOR DELETE USING (true);
+
+-- Meta Data policies
+CREATE POLICY meta_data_select ON meta_data FOR SELECT USING (true);
+CREATE POLICY meta_data_insert ON meta_data FOR INSERT WITH CHECK (true);
+CREATE POLICY meta_data_update ON meta_data FOR UPDATE USING (true);
+CREATE POLICY meta_data_delete ON meta_data FOR DELETE USING (true);
+
+-- User Settings policies
+CREATE POLICY "Users can read their own settings" ON user_settings 
+  FOR SELECT TO authenticated USING (auth.uid() = user_id);
+  
+CREATE POLICY "Users can create/update their own settings" ON user_settings
+  FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Add function to update the updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Add triggers to automatically update updated_at
+CREATE TRIGGER update_pain_point_clusters_updated_at
+BEFORE UPDATE ON pain_point_clusters
+FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+
+CREATE TRIGGER update_meta_data_updated_at
+BEFORE UPDATE ON meta_data
+FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+
+CREATE TRIGGER update_user_settings_updated_at
+BEFORE UPDATE ON user_settings
+FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column(); 

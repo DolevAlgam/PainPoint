@@ -1,11 +1,14 @@
 "use client"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { UserNav } from "@/components/user-nav"
+import { useState } from "react"
 
 export default function Navbar() {
   const pathname = usePathname()
+  const router = useRouter()
+  const [searchQuery, setSearchQuery] = useState("")
 
   const getPageTitle = () => {
     if (pathname === "/") return "Dashboard"
@@ -16,6 +19,13 @@ export default function Navbar() {
     return "PainPoint"
   }
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (searchQuery.trim()) {
+      router.push(`/search?q=${encodeURIComponent(searchQuery)}`)
+    }
+  }
+
   return (
     <header className="sticky top-0 z-10 border-b bg-background">
       <div className="flex h-16 items-center justify-between px-4 md:px-6">
@@ -23,10 +33,16 @@ export default function Navbar() {
           <h1 className="text-xl font-semibold">{getPageTitle()}</h1>
         </div>
         <div className="flex items-center gap-4">
-          <div className="relative hidden md:block">
+          <form onSubmit={handleSearch} className="relative hidden md:block">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input type="search" placeholder="Search..." className="w-64 pl-8" />
-          </div>
+            <Input 
+              type="search" 
+              placeholder="Search..." 
+              className="w-64 pl-8" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </form>
           <UserNav />
         </div>
       </div>
