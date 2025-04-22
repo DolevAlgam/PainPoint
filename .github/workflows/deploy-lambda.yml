@@ -13,7 +13,8 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_REGION: us-west-2
+  CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+  CDK_DEFAULT_REGION: us-east-1
 
 jobs:
   deploy:
@@ -59,21 +60,36 @@ jobs:
           npm ci
           npm run build
 
+      # Bootstrap CDK (if not already done)
+      - name: Bootstrap CDK
+        working-directory: ./infrastructure/cdk
+        run: |
+          npm ci
+          npx cdk bootstrap aws://${{ env.CDK_DEFAULT_ACCOUNT }}/${{ env.AWS_REGION }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
       # Deploy CDK infrastructure
       - name: Deploy CDK infrastructure
         working-directory: ./infrastructure/cdk
         run: |
-          npm ci
           npm run build
           npx cdk deploy --require-approval never
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          AWS_REGION: ${{ env.AWS_REGION }}
 
-      # Output SQS Queue URLs
+      # Output SQS Queue URLs and save to file
       - name: Get SQS Queue URLs
         id: get-queue-urls
         run: |
           aws cloudformation describe-stacks --stack-name PainpointLambdaStack --query "Stacks[0].Outputs" --output json > queue-outputs.json
-          echo "Queue URLs have been retrieved. Add these to your Vercel environment variables." 
+          echo "Queue URLs have been saved to queue-outputs.json. Add these to your Vercel environment variables."
+
+      # Upload queue URLs as artifact
+      - name: Upload queue URLs
+        uses: actions/upload-artifact@v2
+        with:
+          name: queue-urls
+          path: queue-outputs.json 

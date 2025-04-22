@@ -56,7 +56,7 @@ export class PainpointLambdaStack extends cdk.Stack {
     // Create Lambda functions
     const transcribeLambda = new lambda.Function(this, 'TranscribeLambda', {
       runtime: lambda.Runtime.NODEJS_18_X,
-      code: lambda.Code.fromAsset('../lambda/transcribe'),
+      code: lambda.Code.fromAsset('../../lambda/transcribe'),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(15),
       memorySize: 2048, // 2GB of memory
@@ -70,7 +70,7 @@ export class PainpointLambdaStack extends cdk.Stack {
     
     const analyzeTranscriptLambda = new lambda.Function(this, 'AnalyzeTranscriptLambda', {
       runtime: lambda.Runtime.NODEJS_18_X,
-      code: lambda.Code.fromAsset('../lambda/analyze-transcript'),
+      code: lambda.Code.fromAsset('../../lambda/analyze-transcript'),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(10),
       memorySize: 1024, // 1GB of memory
@@ -83,7 +83,7 @@ export class PainpointLambdaStack extends cdk.Stack {
     
     const analyzePainPointsLambda = new lambda.Function(this, 'AnalyzePainPointsLambda', {
       runtime: lambda.Runtime.NODEJS_18_X,
-      code: lambda.Code.fromAsset('../lambda/analyze-common-pain-points'),
+      code: lambda.Code.fromAsset('../../lambda/analyze-common-pain-points'),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(10),
       memorySize: 1024, // 1GB of memory
