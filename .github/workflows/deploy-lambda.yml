@@ -45,19 +45,19 @@ jobs:
       - name: Build transcribe Lambda
         working-directory: ./lambda/transcribe
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Build analyze-transcript Lambda
         working-directory: ./lambda/analyze-transcript
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Build analyze-common-pain-points Lambda
         working-directory: ./lambda/analyze-common-pain-points
         run: |
-          npm ci
+          npm install
           npm run build
 
       # Bootstrap CDK (if not already done)
