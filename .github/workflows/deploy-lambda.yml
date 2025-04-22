@@ -74,6 +74,7 @@ jobs:
       - name: Deploy CDK infrastructure
         working-directory: ./infrastructure/cdk
         run: |
+          npm install -g aws-cdk
           npm run build
           echo "Starting CDK deployment..."
           cdk deploy --require-approval never --verbose || {
