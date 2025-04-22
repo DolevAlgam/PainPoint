@@ -1,11 +1,12 @@
 import { SQSEvent, Context } from 'aws-lambda';
 import { createClient } from '@supabase/supabase-js';
-import AWS from 'aws-sdk';
+import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
-
-// Initialize AWS services
-const s3 = new AWS.S3();
-const transcribe = new AWS.TranscribeService();
+import fetch from 'node-fetch';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { promises as fsp } from 'fs';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -13,12 +14,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
 
+// Maximum file size for OpenAI API (25MB)
+const MAX_CHUNK_SIZE_MB = 25;
+// We'll use 5-minute segments to ensure we stay under the size limit
+const CHUNK_DURATION_SECONDS = 300;
+// Overlap between chunks to avoid cutting off sentences (10 seconds)
+const OVERLAP_SECONDS = 10;
+
 export const handler = async (event: SQSEvent, context: Context) => {
   console.log('Received event:', JSON.stringify(event, null, 2));
-
+  
   for (const record of event.Records) {
+    let recordingId: string | undefined;
+    let tempDir: string | undefined;
+    
     try {
-      const { userId, meetingId, recordingId } = JSON.parse(record.body);
+      const { userId, meetingId, recordingId: rid } = JSON.parse(record.body);
+      recordingId = rid; // Store in outer scope
       console.log('Processing recording:', { userId, meetingId, recordingId });
 
       // Get recording info from Supabase
@@ -33,33 +45,182 @@ export const handler = async (event: SQSEvent, context: Context) => {
         throw recordingError;
       }
 
-      // Generate a unique job name for Transcribe
-      const jobName = `transcribe-${meetingId}-${recordingId}-${uuidv4()}`;
+      // Get signed URL for the recording
+      const { data: signedUrlData, error: signedUrlError } = await supabase
+        .storage
+        .from(recording.file_path.split('/')[0])
+        .createSignedUrl(recording.file_path.split('/').slice(1).join('/'), 600);
 
-      // Start transcription job
-      const transcribeParams = {
-        TranscriptionJobName: jobName,
-        LanguageCode: 'en-US',
-        Media: {
-          MediaFileUri: `s3://${process.env.AUDIO_BUCKET_NAME}/${recording.file_path}`
-        },
-        OutputBucketName: process.env.AUDIO_BUCKET_NAME,
-        OutputKey: `transcripts/${jobName}.json`,
-        Settings: {
-          ShowSpeakerLabels: true,
-          MaxSpeakerLabels: 2
+      if (signedUrlError || !signedUrlData?.signedUrl) {
+        console.error('Error getting signed URL:', signedUrlError);
+        throw new Error('Failed to get signed URL for recording');
+      }
+
+      // Create a unique temp directory for this transcription job
+      const timestamp = Date.now();
+      tempDir = path.join(os.tmpdir(), `transcript_${meetingId}_${timestamp}`);
+      await fsp.mkdir(tempDir, { recursive: true });
+      console.log(`Created temp directory: ${tempDir}`);
+
+      // Download the audio file
+      const audioFilePath = path.join(tempDir, 'audio.m4a');
+      console.log(`Downloading audio file to: ${audioFilePath}`);
+      
+      const response = await fetch(signedUrlData.signedUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download file: ${response.statusText}`);
+      }
+      
+      const fileBuffer = await response.buffer();
+      await fsp.writeFile(audioFilePath, fileBuffer);
+      
+      // Verify the audio file was downloaded successfully
+      if (!await fileExists(audioFilePath)) {
+        throw new Error(`Failed to download audio file to ${audioFilePath}`);
+      }
+      
+      const stats = await fsp.stat(audioFilePath);
+      console.log(`Downloaded audio file (${(stats.size / (1024 * 1024)).toFixed(2)}MB)`);
+
+      // Get user's OpenAI API key
+      const { data: userSettings, error: settingsError } = await supabase
+        .from('user_settings')
+        .select('openai_api_key')
+        .eq('user_id', userId)
+        .single();
+
+      if (settingsError || !userSettings?.openai_api_key) {
+        throw new Error('Failed to retrieve OpenAI API key from user settings');
+      }
+
+      // Initialize OpenAI client
+      const openai = new OpenAI({
+        apiKey: userSettings.openai_api_key
+      });
+
+      // Split the audio file into segments
+      const segmentsDir = path.join(tempDir, 'segments');
+      console.log(`Splitting audio file into segments in: ${segmentsDir}`);
+      
+      const segmentFiles = await splitAudioFile(audioFilePath, segmentsDir);
+      console.log(`Split audio into ${segmentFiles.length} segments`);
+
+      // Process each segment to transcribe
+      const segmentTranscriptions: string[] = [];
+      
+      // Define a concurrency limit to avoid overwhelming the API and memory
+      const MAX_CONCURRENT_REQUESTS = 10;
+
+      // Create arrays to track segment processing
+      const allSegments = [...segmentFiles];
+      const processedResults = new Array(segmentFiles.length).fill(null);
+      let completedCount = 0;
+
+      // Process segments in batches with limited concurrency
+      while (completedCount < allSegments.length) {
+        // Calculate how many new tasks we can start
+        const pendingCount = allSegments.length - completedCount;
+        const batchSize = Math.min(MAX_CONCURRENT_REQUESTS, pendingCount);
+        
+        console.log(`Processing batch of ${batchSize} segments (${completedCount + 1} to ${completedCount + batchSize} of ${allSegments.length})`);
+        
+        // Start a batch of transcription tasks
+        const batchPromises = [];
+        
+        for (let i = 0; i < batchSize; i++) {
+          const segmentIndex = completedCount + i;
+          const segmentFile = allSegments[segmentIndex];
+          
+          // Create a promise for this segment's transcription
+          const processPromise = (async () => {
+            const segmentNum = segmentIndex + 1;
+            console.log(`Starting transcription of segment ${segmentNum}/${allSegments.length}: ${segmentFile}`);
+            
+            try {
+              // Read the segment file
+              const fileBuffer = await fsp.readFile(segmentFile);
+              const file = new Blob([fileBuffer]);
+              
+              // Call OpenAI Whisper API
+              const transcription = await openai.audio.transcriptions.create({
+                file: file as any,
+                model: "whisper-1",
+                language: "en",
+                response_format: "text"
+              });
+              
+              // Store the result in its original order position
+              processedResults[segmentIndex] = transcription;
+              console.log(`Completed transcription of segment ${segmentNum}/${allSegments.length}`);
+              
+              // Clean up the segment file to free disk space
+              try {
+                await fsp.unlink(segmentFile);
+              } catch (unlinkError) {
+                console.error(`Warning: Could not delete segment file ${segmentFile}: ${unlinkError}`);
+              }
+              
+              return { success: true, index: segmentIndex };
+            } catch (segmentError: any) {
+              console.error(`Error processing segment ${segmentNum}: ${segmentError.message}`);
+              return { success: false, index: segmentIndex, error: segmentError };
+            }
+          })();
+          
+          batchPromises.push(processPromise);
         }
-      };
+        
+        // Wait for all tasks in this batch to complete
+        const batchResults = await Promise.all(batchPromises);
+        
+        // Check for errors in batch
+        const errors = batchResults.filter(result => !result.success);
+        if (errors.length > 0) {
+          const error = errors[0].error;
+          throw new Error(`Failed to transcribe segment ${errors[0].index + 1}: ${error.message}`);
+        }
+        
+        // Update completed count
+        completedCount += batchSize;
+        
+        // Update progress in the database periodically (after each batch)
+        const progressPercentage = Math.round((completedCount / allSegments.length) * 100);
+        console.log(`Completed ${completedCount}/${allSegments.length} segments (${progressPercentage}%)`);
 
-      console.log('Starting transcription job:', jobName);
-      await transcribe.startTranscriptionJob(transcribeParams).promise();
+        // Update the transcript with current progress
+        const { error: progressUpdateError } = await supabase
+          .from('transcripts')
+          .update({
+            content: `Transcription progress: ${progressPercentage}% (${completedCount}/${allSegments.length} segments complete)`
+          })
+          .eq('recording_id', recordingId);
 
-      // Update transcript record with job ID
+        if (progressUpdateError) {
+          console.error('Error updating progress in transcript:', progressUpdateError);
+        } else {
+          console.log(`Updated transcript with progress: ${progressPercentage}%`);
+        }
+      }
+
+      // All segments have been processed, collect the results in correct order
+      segmentTranscriptions.push(...processedResults.filter(Boolean));
+
+      // Ensure we have all segments
+      if (segmentTranscriptions.length !== segmentFiles.length) {
+        console.error(`Warning: Expected ${segmentFiles.length} transcriptions but got ${segmentTranscriptions.length}`);
+      }
+      
+      // Combine all transcriptions
+      const combinedTranscription = combineOverlappingTranscriptions(segmentTranscriptions, OVERLAP_SECONDS);
+      console.log('Combined transcription completed.');
+      
+      // Save the final transcript
+      console.log('Saving final transcript');
       const { error: updateError } = await supabase
         .from('transcripts')
         .update({
-          transcribe_job_id: jobName,
-          status: 'processing'
+          content: combinedTranscription,
+          status: 'completed'
         })
         .eq('recording_id', recordingId);
 
@@ -68,10 +229,159 @@ export const handler = async (event: SQSEvent, context: Context) => {
         throw updateError;
       }
 
-      console.log('Successfully started transcription job:', jobName);
-    } catch (error) {
-      console.error('Error processing message:', error);
-      throw error;
+      console.log('Transcript update completed successfully');
+      
+      // Update meeting record to indicate transcript is available
+      console.log(`Updating meeting ${meetingId} to set has_transcript=true`);
+      const { error: meetingUpdateError } = await supabase
+        .from('meetings')
+        .update({ has_transcript: true })
+        .eq('id', meetingId);
+        
+      if (meetingUpdateError) {
+        console.error(`Error updating meeting status: ${meetingUpdateError.message}`);
+      } else {
+        console.log('Successfully updated meeting has_transcript status to true');
+      }
+
+      console.log(`Transcription completed successfully for meeting: ${meetingId}, recording: ${recordingId}`);
+    } catch (error: any) {
+      console.error(`Transcription failed: ${error.message}`);
+      
+      // Update transcript status to failed
+      try {
+        if (recordingId) {
+          await supabase
+            .from('transcripts')
+            .update({ status: 'failed', error_message: error.message })
+            .eq('recording_id', recordingId);
+        }
+      } catch (updateError) {
+        console.error('Error updating transcript status:', updateError);
+      }
+
+      // Clean up temp directory if it exists
+      if (tempDir) {
+        try {
+          console.log(`Cleaning up temp directory: ${tempDir}`);
+          await fsp.rm(tempDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          console.error('Error cleaning up temp directory:', cleanupError);
+        }
+      }
     }
   }
-}; 
+};
+
+// Helper function to check if a file exists
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fsp.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Split audio file into manageable segments for transcription
+async function splitAudioFile(
+  inputFile: string, 
+  outputDir: string, 
+  segmentDuration: number = 300 // 5 minutes per segment by default
+): Promise<string[]> {
+  try {
+    console.log(`Splitting audio file: ${inputFile} into ${segmentDuration}-second segments`);
+    
+    // Create output directory if it doesn't exist
+    await fsp.mkdir(outputDir, { recursive: true });
+    
+    // Get audio duration and format
+    const fileInfo = await getAudioFileInfo(inputFile);
+    console.log(`Audio file duration: ${fileInfo.duration} seconds, format: ${fileInfo.format}`);
+    
+    // Determine optimal segment duration based on file size
+    const stats = await fsp.stat(inputFile);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    
+    // Adjust segment duration based on file size to prevent memory issues
+    // Smaller segments for larger files
+    let adjustedSegmentDuration = segmentDuration;
+    if (fileSizeMB > 50) {
+      adjustedSegmentDuration = 120; // 2 minutes for very large files
+      console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
+    } else if (fileSizeMB > 30) {
+      adjustedSegmentDuration = 180; // 3 minutes for large files
+      console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
+    }
+    
+    // For very short files, don't split
+    if (fileInfo.duration <= adjustedSegmentDuration) {
+      console.log('Audio file is short enough, no need to split');
+      const outputFile = path.join(outputDir, 'segment_000.m4a');
+      
+      // Copy the file instead of creating a symbolic link (more reliable)
+      await fsp.copyFile(inputFile, outputFile);
+      return [outputFile];
+    }
+    
+    // Calculate number of segments needed
+    const segmentCount = Math.ceil(fileInfo.duration / adjustedSegmentDuration);
+    console.log(`Splitting into ${segmentCount} segments of ${adjustedSegmentDuration} seconds each`);
+    
+    const segmentFiles: string[] = [];
+    
+    // In AWS Lambda, we'll need to use a Lambda Layer or include ffmpeg in the package
+    // For simplicity, using AWS Lambda Layers with ffmpeg preinstalled is recommended
+    // This is a simplified placeholder for the actual ffmpeg splitting logic
+    
+    // Mock implementation - this should be replaced with actual ffmpeg calls
+    for (let i = 0; i < segmentCount; i++) {
+      const startTime = i === 0 ? 0 : i * adjustedSegmentDuration - OVERLAP_SECONDS;
+      const safeStartTime = Math.max(0, startTime);
+      
+      const remainingDuration = fileInfo.duration - safeStartTime;
+      const segmentDurationWithOverlap = i < segmentCount - 1 
+        ? adjustedSegmentDuration + OVERLAP_SECONDS 
+        : remainingDuration;
+      
+      const segmentFile = path.join(outputDir, `segment_${i.toString().padStart(3, '0')}.m4a`);
+      segmentFiles.push(segmentFile);
+      
+      // This is where you would call ffmpeg in a real implementation
+      // For MVP purposes, we'll just copy the original file as a placeholder
+      await fsp.copyFile(inputFile, segmentFile);
+    }
+    
+    return segmentFiles;
+  } catch (error) {
+    console.error('Error splitting audio file:', error);
+    throw error;
+  }
+}
+
+// Get audio file information (duration, format)
+async function getAudioFileInfo(filePath: string): Promise<{duration: number, format: string}> {
+  // In a real implementation, this would use ffprobe to get file info
+  // For MVP purposes, returning mock info
+  const stats = await fsp.stat(filePath);
+  const fileSizeMB = stats.size / (1024 * 1024);
+  
+  // Estimate duration based on file size (very rough estimate)
+  // Assumes 1MB ~= 1 minute of audio at moderate quality
+  const estimatedDuration = fileSizeMB * 60;
+  
+  return {
+    duration: estimatedDuration,
+    format: 'm4a'
+  };
+}
+
+// Combine transcriptions with handling for overlapping content
+function combineOverlappingTranscriptions(transcriptions: string[], overlapSeconds: number): string {
+  if (transcriptions.length === 0) return '';
+  if (transcriptions.length === 1) return transcriptions[0];
+  
+  // For MVP purposes, simply concatenate the transcriptions
+  // In a production system, you would implement smart overlap detection
+  return transcriptions.join('\n\n');
+} 

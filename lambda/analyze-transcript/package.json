@@ -1,19 +1,19 @@
 {
-  "name": "painpoint-analyze-transcript-lambda",
+  "name": "analyze-transcript-lambda",
   "version": "1.0.0",
-  "description": "Lambda function for analyzing transcripts",
+  "description": "Lambda function for analyzing transcripts using OpenAI",
   "main": "index.js",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.10.0",
-    "aws-sdk": "^2.1333.0",
+    "@supabase/supabase-js": "^2.39.0",
     "openai": "^4.0.0"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.114",
-    "@types/node": "^18.15.3",
-    "typescript": "^5.0.2"
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
   }
 } 

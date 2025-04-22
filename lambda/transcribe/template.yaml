@@ -1,0 +1,29 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Local testing template for Transcribe Lambda
+
+Resources:
+  TranscribeLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: dist/index.handler
+      Runtime: nodejs18.x
+      Timeout: 900
+      MemorySize: 2048
+      Environment:
+        Variables:
+          SUPABASE_URL: !Ref SupabaseUrl
+          SUPABASE_SERVICE_ROLE_KEY: !Ref SupabaseServiceRoleKey
+          AUDIO_BUCKET_NAME: !Ref AudioBucketName
+
+Parameters:
+  SupabaseUrl:
+    Type: String
+    Default: https://ijwgpuwpkcuhonoyzkll.supabase.co
+  SupabaseServiceRoleKey:
+    Type: String
+    Default: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlqd2dwdXdwa2N1aG9ub3l6a2xsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0MzU2NTU1MSwiZXhwIjoyMDU5MTQxNTUxfQ.g7BbNr7-imMQ6dJlx3AyM3lc3a6_hDfa7w5wjwqvR8c
+  AudioBucketName:
+    Type: String
+    Default: painpoint-audio-bucket 

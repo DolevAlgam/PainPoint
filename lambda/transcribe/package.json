@@ -1,22 +1,25 @@
 {
   "name": "transcribe-lambda",
   "version": "1.0.0",
-  "description": "Lambda function for transcribing audio files",
+  "description": "Lambda function for transcribing audio files using OpenAI Whisper",
   "main": "index.js",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "aws-sdk": "^2.1509.0",
-    "node-fetch": "^3.3.0",
+    "node-fetch": "^2.7.0",
     "openai": "^4.0.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.114",
-    "@types/node": "^18.15.3",
-    "@types/uuid": "^9.0.1",
-    "typescript": "^5.0.2"
+    "@types/aws-lambda": "^8.10.0",
+    "@types/node": "^20.0.0",
+    "@types/node-fetch": "^2.6.2",
+    "@types/uuid": "^9.0.0",
+    "typescript": "^5.0.0"
   }
-} 
+}
