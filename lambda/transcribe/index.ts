@@ -46,13 +46,26 @@ export const handler = async (event: SQSEvent, context: Context) => {
       }
 
       // Get signed URL for the recording
+      const bucketName = recording.file_path.split('/')[0];
+      const filePath = recording.file_path.split('/').slice(1).join('/');
+      console.log('Attempting to get signed URL with:', {
+        bucketName,
+        filePath,
+        fullPath: recording.file_path
+      });
+
       const { data: signedUrlData, error: signedUrlError } = await supabase
         .storage
-        .from(recording.file_path.split('/')[0])
-        .createSignedUrl(recording.file_path.split('/').slice(1).join('/'), 600);
+        .from(bucketName)
+        .createSignedUrl(filePath, 600);
 
       if (signedUrlError || !signedUrlData?.signedUrl) {
-        console.error('Error getting signed URL:', signedUrlError);
+        console.error('Error getting signed URL:', {
+          error: signedUrlError,
+          bucketName,
+          filePath,
+          fullPath: recording.file_path
+        });
         throw new Error('Failed to get signed URL for recording');
       }
 
