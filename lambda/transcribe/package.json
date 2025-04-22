@@ -1,5 +1,5 @@
 {
-  "name": "painpoint-transcribe-lambda",
+  "name": "transcribe-lambda",
   "version": "1.0.0",
   "description": "Lambda function for transcribing audio files",
   "main": "index.js",
@@ -7,8 +7,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.10.0",
-    "aws-sdk": "^2.1333.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "aws-sdk": "^2.1509.0",
     "node-fetch": "^3.3.0",
     "openai": "^4.0.0",
     "uuid": "^9.0.0"
