@@ -140,16 +140,20 @@ export async function POST(req: NextRequest) {
         });
       }
       
-      const sqsParams = {
+      const sqsParams: AWS.SQS.SendMessageRequest = {
         QueueUrl: TRANSCRIBE_QUEUE_URL,
         MessageBody: JSON.stringify({
           userId,
           meetingId,
           recordingId: recording.id
-        }),
-        MessageDeduplicationId: `transcript-${meetingId}-${recording.id}-${Date.now()}`,
-        MessageGroupId: `transcript-${meetingId}`
+        })
       };
+
+      // Only add FIFO-specific parameters if the queue is a FIFO queue
+      if (TRANSCRIBE_QUEUE_URL.includes('.fifo')) {
+        sqsParams.MessageDeduplicationId = `transcript-${meetingId}-${recording.id}-${Date.now()}`;
+        sqsParams.MessageGroupId = `transcript-${meetingId}`;
+      }
       
       try {
         const sqsResponse = await sqs.sendMessage(sqsParams).promise();
