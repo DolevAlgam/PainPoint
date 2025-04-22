@@ -76,7 +76,7 @@ jobs:
         run: |
           npm run build
           echo "Starting CDK deployment..."
-          npx cdk deploy --require-approval never --verbose || {
+          cdk deploy --require-approval never --verbose || {
             echo "CDK deployment failed"
             exit 1
           }
