@@ -46,8 +46,8 @@ export const handler = async (event: SQSEvent, context: Context) => {
       }
 
       // Get signed URL for the recording
-      const bucketName = recording.file_path.split('/')[0];
-      const filePath = recording.file_path.split('/').slice(1).join('/');
+      const bucketName = 'recordings';
+      const filePath = recording.file_path;
       console.log('Attempting to get signed URL with:', {
         bucketName,
         filePath,
