@@ -75,7 +75,12 @@ jobs:
         working-directory: ./infrastructure/cdk
         run: |
           npm run build
-          npx cdk deploy --require-approval never
+          echo "Starting CDK deployment..."
+          npx cdk deploy --require-approval never --verbose || {
+            echo "CDK deployment failed"
+            exit 1
+          }
+          echo "CDK deployment completed successfully"
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -83,7 +88,9 @@ jobs:
       # Output SQS Queue URLs and save to file
       - name: Get SQS Queue URLs
         id: get-queue-urls
+        if: success()
         run: |
+          echo "Getting stack outputs..."
           aws cloudformation describe-stacks --stack-name PainpointLambdaStack --query "Stacks[0].Outputs" --output json > queue-outputs.json
           echo "Queue URLs have been saved to queue-outputs.json. Add these to your Vercel environment variables."
 
