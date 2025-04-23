@@ -60,6 +60,7 @@ export class PainpointLambdaStack extends cdk.Stack {
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(15),
       memorySize: 4096, // 4GB of memory
+      ephemeralStorageSize: cdk.Size.gibibytes(5), // 5GB of ephemeral storage
       role: lambdaRole,
       environment: {
         SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
