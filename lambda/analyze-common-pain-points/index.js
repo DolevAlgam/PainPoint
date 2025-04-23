@@ -141,7 +141,7 @@ async function storePainPointClusters(clusters) {
         const { error: deleteError } = await adminSupabase
             .from('pain_point_clusters')
             .delete()
-            .filter('id', 'is', 'not.null');
+            .neq('id', null);
         if (deleteError) {
             console.error('Error deleting existing clusters:', deleteError);
         }
@@ -190,18 +190,19 @@ async function shouldRefreshClusters() {
     try {
         // Get the last analysis timestamp
         const { data, error } = await adminSupabase
-            .from('system_settings')
-            .select('last_cluster_analysis')
-            .single();
+            .from('meta_data')
+            .select('value')
+            .eq('key', 'last_pain_point_analysis')
+            .maybeSingle();
         if (error) {
             console.error('Error fetching last analysis timestamp:', error);
             return true; // Default to refresh if we can't check
         }
-        if (!(data === null || data === void 0 ? void 0 : data.last_cluster_analysis)) {
+        if (!(data === null || data === void 0 ? void 0 : data.value)) {
             return true; // No previous analysis, need to refresh
         }
         // Check if it's been more than 24 hours since last analysis
-        const lastAnalysis = new Date(data.last_cluster_analysis);
+        const lastAnalysis = new Date(data.value);
         const now = new Date();
         const hoursSinceLastAnalysis = (now.getTime() - lastAnalysis.getTime()) / (1000 * 60 * 60);
         return hoursSinceLastAnalysis >= 24;
@@ -217,10 +218,10 @@ async function shouldRefreshClusters() {
 async function updateLastAnalysisTimestamp() {
     try {
         const { error } = await adminSupabase
-            .from('system_settings')
+            .from('meta_data')
             .upsert({
-            id: 1,
-            last_cluster_analysis: new Date().toISOString()
+            key: 'last_pain_point_analysis',
+            value: new Date().toISOString()
         });
         if (error) {
             console.error('Error updating last analysis timestamp:', error);
