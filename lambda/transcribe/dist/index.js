@@ -52,6 +52,9 @@ const MAX_CHUNK_SIZE_MB = 25;
 const CHUNK_DURATION_SECONDS = 300;
 // Overlap between chunks to avoid cutting off sentences (10 seconds)
 const OVERLAP_SECONDS = 10;
+// Get the path to the ffmpeg binaries
+const FFMPEG_PATH = path.join(__dirname, 'bin', 'ffmpeg');
+const FFPROBE_PATH = path.join(__dirname, 'bin', 'ffprobe');
 const handler = async (event, context) => {
     console.log('Received event:', JSON.stringify(event, null, 2));
     for (const record of event.Records) {
@@ -301,18 +304,17 @@ async function splitAudioFile(inputFile, outputDir, segmentDuration = 300 // 5 m
         // Smaller segments for larger files
         let adjustedSegmentDuration = segmentDuration;
         if (fileSizeMB > 50) {
-            adjustedSegmentDuration = 120; // 2 minutes for very large files
+            adjustedSegmentDuration = 60; // 1 minute for very large files
             console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
         }
         else if (fileSizeMB > 30) {
-            adjustedSegmentDuration = 180; // 3 minutes for large files
+            adjustedSegmentDuration = 120; // 2 minutes for large files
             console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
         }
         // For very short files, don't split
         if (fileInfo.duration <= adjustedSegmentDuration) {
             console.log('Audio file is short enough, no need to split');
             const outputFile = path.join(outputDir, 'segment_000.m4a');
-            // Copy the file instead of creating a symbolic link (more reliable)
             await fs_1.promises.copyFile(inputFile, outputFile);
             return [outputFile];
         }
@@ -320,10 +322,7 @@ async function splitAudioFile(inputFile, outputDir, segmentDuration = 300 // 5 m
         const segmentCount = Math.ceil(fileInfo.duration / adjustedSegmentDuration);
         console.log(`Splitting into ${segmentCount} segments of ${adjustedSegmentDuration} seconds each`);
         const segmentFiles = [];
-        // In AWS Lambda, we'll need to use a Lambda Layer or include ffmpeg in the package
-        // For simplicity, using AWS Lambda Layers with ffmpeg preinstalled is recommended
-        // This is a simplified placeholder for the actual ffmpeg splitting logic
-        // Mock implementation - this should be replaced with actual ffmpeg calls
+        // Use ffmpeg to split the audio file
         for (let i = 0; i < segmentCount; i++) {
             const startTime = i === 0 ? 0 : i * adjustedSegmentDuration - OVERLAP_SECONDS;
             const safeStartTime = Math.max(0, startTime);
@@ -333,9 +332,39 @@ async function splitAudioFile(inputFile, outputDir, segmentDuration = 300 // 5 m
                 : remainingDuration;
             const segmentFile = path.join(outputDir, `segment_${i.toString().padStart(3, '0')}.m4a`);
             segmentFiles.push(segmentFile);
-            // This is where you would call ffmpeg in a real implementation
-            // For MVP purposes, we'll just copy the original file as a placeholder
-            await fs_1.promises.copyFile(inputFile, segmentFile);
+            // Use ffmpeg to split the audio with proper encoding
+            const ffmpegCommand = [
+                `"${FFMPEG_PATH}"`,
+                '-i', inputFile,
+                '-ss', safeStartTime.toString(),
+                '-t', segmentDurationWithOverlap.toString(),
+                '-c:a', 'aac', // Use AAC codec for better compression
+                '-b:a', '128k', // Set bitrate to 128kbps to control file size
+                '-y', // Overwrite output file if it exists
+                segmentFile
+            ];
+            const { exec } = require('child_process');
+            await new Promise((resolve, reject) => {
+                exec(ffmpegCommand.join(' '), (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`Error splitting segment ${i}:`, error);
+                        reject(error);
+                    }
+                    else {
+                        resolve(true);
+                    }
+                });
+            });
+            // Verify the segment size
+            const segmentStats = await fs_1.promises.stat(segmentFile);
+            const segmentSizeMB = segmentStats.size / (1024 * 1024);
+            console.log(`Segment ${i} size: ${segmentSizeMB.toFixed(2)}MB`);
+            if (segmentStats.size > 25 * 1024 * 1024) { // 25MB limit
+                console.warn(`Segment ${i} is too large (${segmentSizeMB.toFixed(2)}MB), reducing duration`);
+                // If segment is too large, reduce duration and try again
+                adjustedSegmentDuration = Math.floor(adjustedSegmentDuration * 0.8); // Reduce by 20%
+                return splitAudioFile(inputFile, outputDir, adjustedSegmentDuration);
+            }
         }
         return segmentFiles;
     }
@@ -344,19 +373,29 @@ async function splitAudioFile(inputFile, outputDir, segmentDuration = 300 // 5 m
         throw error;
     }
 }
-// Get audio file information (duration, format)
+// Get audio file information using ffprobe
 async function getAudioFileInfo(filePath) {
-    // In a real implementation, this would use ffprobe to get file info
-    // For MVP purposes, returning mock info
-    const stats = await fs_1.promises.stat(filePath);
-    const fileSizeMB = stats.size / (1024 * 1024);
-    // Estimate duration based on file size (very rough estimate)
-    // Assumes 1MB ~= 1 minute of audio at moderate quality
-    const estimatedDuration = fileSizeMB * 60;
-    return {
-        duration: estimatedDuration,
-        format: 'm4a'
-    };
+    const { exec } = require('child_process');
+    return new Promise((resolve, reject) => {
+        exec(`"${FFPROBE_PATH}" -v error -show_entries format=duration,format_name -of json "${filePath}"`, (error, stdout, stderr) => {
+            if (error) {
+                console.error('Error getting file info:', error);
+                reject(error);
+            }
+            else {
+                try {
+                    const info = JSON.parse(stdout);
+                    resolve({
+                        duration: parseFloat(info.format.duration),
+                        format: info.format.format_name
+                    });
+                }
+                catch (e) {
+                    reject(e);
+                }
+            }
+        });
+    });
 }
 // Combine transcriptions with handling for overlapping content
 function combineOverlappingTranscriptions(transcriptions, overlapSeconds) {

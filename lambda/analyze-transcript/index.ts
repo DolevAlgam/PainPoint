@@ -150,7 +150,7 @@ async function analyzePainPoints(transcript: string, apiKey: string): Promise<an
      * Adjust the prompt and roles as needed for your use case.
      */
     const roughAnalysisResponse = await openai.responses.create({
-      model: "o1",
+      model: "o1-pro",
       input: [
         {
           role: "developer",
@@ -202,7 +202,7 @@ ${transcript}`
 
     /**
      * Extract the rough analysis text.
-     * The o1 model puts the analysis in output_text
+     * The o1-pro model puts the analysis in output_text
      */
     const roughAnalysisText = 
       (roughAnalysisResponse as any).output_text || 

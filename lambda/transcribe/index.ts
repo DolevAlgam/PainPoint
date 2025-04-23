@@ -21,6 +21,14 @@ const MAX_CHUNK_SIZE_MB = 25;
 const CHUNK_DURATION_SECONDS = 300;
 // Overlap between chunks to avoid cutting off sentences (10 seconds)
 const OVERLAP_SECONDS = 10;
+// Maximum recursion depth for segment splitting
+const MAX_RECURSION_DEPTH = 5;
+// Minimum segment duration (30 seconds)
+const MIN_SEGMENT_DURATION = 30;
+
+// Get the path to the ffmpeg binaries
+const FFMPEG_PATH = path.join(__dirname, 'bin', 'ffmpeg');
+const FFPROBE_PATH = path.join(__dirname, 'bin', 'ffprobe');
 
 export const handler = async (event: SQSEvent, context: Context) => {
   console.log('Received event:', JSON.stringify(event, null, 2));
@@ -300,10 +308,15 @@ async function fileExists(filePath: string): Promise<boolean> {
 async function splitAudioFile(
   inputFile: string, 
   outputDir: string, 
-  segmentDuration: number = 300 // 5 minutes per segment by default
+  segmentDuration: number = CHUNK_DURATION_SECONDS,
+  recursionDepth: number = 0
 ): Promise<string[]> {
   try {
-    console.log(`Splitting audio file: ${inputFile} into ${segmentDuration}-second segments`);
+    if (recursionDepth >= MAX_RECURSION_DEPTH) {
+      throw new Error(`Maximum recursion depth (${MAX_RECURSION_DEPTH}) reached while trying to split audio file`);
+    }
+
+    console.log(`Splitting audio file: ${inputFile} into ${segmentDuration}-second segments (recursion depth: ${recursionDepth})`);
     
     // Create output directory if it doesn't exist
     await fsp.mkdir(outputDir, { recursive: true });
@@ -319,20 +332,27 @@ async function splitAudioFile(
     // Adjust segment duration based on file size to prevent memory issues
     // Smaller segments for larger files
     let adjustedSegmentDuration = segmentDuration;
-    if (fileSizeMB > 50) {
-      adjustedSegmentDuration = 120; // 2 minutes for very large files
+    if (fileSizeMB > 100) {
+      adjustedSegmentDuration = 30; // 30 seconds for very large files
+      console.log(`Very large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
+    } else if (fileSizeMB > 50) {
+      adjustedSegmentDuration = 60; // 1 minute for large files
       console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
     } else if (fileSizeMB > 30) {
-      adjustedSegmentDuration = 180; // 3 minutes for large files
-      console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
+      adjustedSegmentDuration = 120; // 2 minutes for medium files
+      console.log(`Medium file detected (${fileSizeMB.toFixed(2)}MB), reducing segment duration to ${adjustedSegmentDuration} seconds`);
+    }
+    
+    // Ensure we don't go below minimum segment duration
+    if (adjustedSegmentDuration < MIN_SEGMENT_DURATION) {
+      console.warn(`Warning: Calculated segment duration (${adjustedSegmentDuration}s) is below minimum (${MIN_SEGMENT_DURATION}s). Using minimum duration.`);
+      adjustedSegmentDuration = MIN_SEGMENT_DURATION;
     }
     
     // For very short files, don't split
     if (fileInfo.duration <= adjustedSegmentDuration) {
       console.log('Audio file is short enough, no need to split');
       const outputFile = path.join(outputDir, 'segment_000.m4a');
-      
-      // Copy the file instead of creating a symbolic link (more reliable)
       await fsp.copyFile(inputFile, outputFile);
       return [outputFile];
     }
@@ -343,11 +363,7 @@ async function splitAudioFile(
     
     const segmentFiles: string[] = [];
     
-    // In AWS Lambda, we'll need to use a Lambda Layer or include ffmpeg in the package
-    // For simplicity, using AWS Lambda Layers with ffmpeg preinstalled is recommended
-    // This is a simplified placeholder for the actual ffmpeg splitting logic
-    
-    // Mock implementation - this should be replaced with actual ffmpeg calls
+    // Use ffmpeg to split the audio file
     for (let i = 0; i < segmentCount; i++) {
       const startTime = i === 0 ? 0 : i * adjustedSegmentDuration - OVERLAP_SECONDS;
       const safeStartTime = Math.max(0, startTime);
@@ -360,9 +376,57 @@ async function splitAudioFile(
       const segmentFile = path.join(outputDir, `segment_${i.toString().padStart(3, '0')}.m4a`);
       segmentFiles.push(segmentFile);
       
-      // This is where you would call ffmpeg in a real implementation
-      // For MVP purposes, we'll just copy the original file as a placeholder
-      await fsp.copyFile(inputFile, segmentFile);
+      // Use ffmpeg to split the audio with proper encoding
+      const ffmpegCommand = [
+        `"${FFMPEG_PATH}"`,
+        '-i', inputFile,
+        '-ss', safeStartTime.toString(),
+        '-t', segmentDurationWithOverlap.toString(),
+        '-c:a', 'aac', // Use AAC codec for better compression
+        '-b:a', '128k', // Set bitrate to 128kbps to control file size
+        '-y', // Overwrite output file if it exists
+        segmentFile
+      ];
+      
+      const { exec } = require('child_process');
+      await new Promise((resolve, reject) => {
+        exec(ffmpegCommand.join(' '), (error: any, stdout: any, stderr: any) => {
+          if (error) {
+            console.error(`Error splitting segment ${i}:`, error);
+            reject(error);
+          } else {
+            resolve(true);
+          }
+        });
+      });
+      
+      // Verify the segment size
+      const segmentStats = await fsp.stat(segmentFile);
+      const segmentSizeMB = segmentStats.size / (1024 * 1024);
+      console.log(`Segment ${i} size: ${segmentSizeMB.toFixed(2)}MB`);
+      
+      if (segmentStats.size > MAX_CHUNK_SIZE_MB * 1024 * 1024) {
+        console.warn(`Segment ${i} is too large (${segmentSizeMB.toFixed(2)}MB > ${MAX_CHUNK_SIZE_MB}MB), reducing duration`);
+        
+        // Calculate new duration based on the size ratio
+        const sizeRatio = segmentSizeMB / MAX_CHUNK_SIZE_MB;
+        const newDuration = Math.floor(adjustedSegmentDuration / sizeRatio);
+        
+        // Ensure we don't go below minimum duration
+        const nextDuration = Math.max(MIN_SEGMENT_DURATION, newDuration);
+        
+        console.log(`Recalculating with new duration: ${nextDuration} seconds (was ${adjustedSegmentDuration}s)`);
+        
+        // Clean up the current segment before retrying
+        try {
+          await fsp.unlink(segmentFile);
+        } catch (unlinkError) {
+          console.error(`Warning: Could not delete segment file ${segmentFile}: ${unlinkError}`);
+        }
+        
+        // Recursively try again with the new duration
+        return splitAudioFile(inputFile, outputDir, nextDuration, recursionDepth + 1);
+      }
     }
     
     return segmentFiles;
@@ -372,21 +436,29 @@ async function splitAudioFile(
   }
 }
 
-// Get audio file information (duration, format)
+// Get audio file information using ffprobe
 async function getAudioFileInfo(filePath: string): Promise<{duration: number, format: string}> {
-  // In a real implementation, this would use ffprobe to get file info
-  // For MVP purposes, returning mock info
-  const stats = await fsp.stat(filePath);
-  const fileSizeMB = stats.size / (1024 * 1024);
+  const { exec } = require('child_process');
   
-  // Estimate duration based on file size (very rough estimate)
-  // Assumes 1MB ~= 1 minute of audio at moderate quality
-  const estimatedDuration = fileSizeMB * 60;
-  
-  return {
-    duration: estimatedDuration,
-    format: 'm4a'
-  };
+  return new Promise((resolve, reject) => {
+    exec(`"${FFPROBE_PATH}" -v error -show_entries format=duration,format_name -of json "${filePath}"`, 
+      (error: any, stdout: any, stderr: any) => {
+        if (error) {
+          console.error('Error getting file info:', error);
+          reject(error);
+        } else {
+          try {
+            const info = JSON.parse(stdout);
+            resolve({
+              duration: parseFloat(info.format.duration),
+              format: info.format.format_name
+            });
+          } catch (e) {
+            reject(e);
+          }
+        }
+      });
+  });
 }
 
 // Combine transcriptions with handling for overlapping content

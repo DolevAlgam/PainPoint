@@ -56,7 +56,7 @@ export class PainpointLambdaStack extends cdk.Stack {
     // Create Lambda functions
     const transcribeLambda = new lambda.Function(this, 'TranscribeLambda', {
       runtime: lambda.Runtime.NODEJS_18_X,
-      code: lambda.Code.fromAsset('../../lambda/transcribe'),
+      code: lambda.Code.fromAsset('../../lambda/transcribe.zip'),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(15),
       memorySize: 4096, // 4GB of memory

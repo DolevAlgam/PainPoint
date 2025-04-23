@@ -264,13 +264,13 @@ async function analyzeCommonPainPoints(painPoints: any[], apiKey: string): Promi
 
   try {
     /**
-     * First Call: Use o1 for deep analysis of pain points to identify patterns
+     * First Call: Use o1-pro for deep analysis of pain points to identify patterns
      * and semantic clustering of related issues.
      */
-    console.log("🔍 OpenAI Service: Making o1 API call for pain point analysis")
+    console.log("🔍 OpenAI Service: Making o1-pro API call for pain point analysis")
     const startTime = Date.now();
     const roughAnalysisResponse = await openai.responses.create({
-      model: "o1",
+      model: "o1-pro",
       input: [
         {
           role: "developer",
@@ -319,10 +319,10 @@ ${JSON.stringify(painPoints, null, 2)}`
       tools: [],
       store: false
     });
-    console.log(`🔍 OpenAI Service: o1 API call completed in ${(Date.now() - startTime) / 1000} seconds`)
+    console.log(`�� OpenAI Service: o1-pro API call completed in ${(Date.now() - startTime) / 1000} seconds`)
 
     /**
-     * Extract the deep analysis text from o1's response.
+     * Extract the deep analysis text from o1-pro's response.
      */
     const roughAnalysisText = 
       (roughAnalysisResponse as any).output_text || 
@@ -335,7 +335,7 @@ ${JSON.stringify(painPoints, null, 2)}`
 
     /**
      * Second Call: Use GPT-4o to transform the textual analysis into structured JSON
-     * This is similar to how analyzePainPoints uses GPT-4o to parse the o1 output
+     * This is similar to how analyzePainPoints uses GPT-4o to parse the o1-pro output
      */
     console.log("🔍 OpenAI Service: Making GPT-4o API call to parse the analysis")
     const jsonStartTime = Date.now();

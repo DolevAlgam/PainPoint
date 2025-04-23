@@ -46,7 +46,9 @@ jobs:
         working-directory: ./lambda/transcribe
         run: |
           npm install
-          npm run build
+          chmod +x prepare-ffmpeg.sh build.sh
+          ./prepare-ffmpeg.sh
+          ./build.sh
 
       - name: Build analyze-transcript Lambda
         working-directory: ./lambda/analyze-transcript
