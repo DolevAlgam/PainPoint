@@ -25,3 +25,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Lambda build artifacts
+lambda/**/*.zip
+lambda/**/dist/
+lambda/**/*.js
+lambda/**/bin/
