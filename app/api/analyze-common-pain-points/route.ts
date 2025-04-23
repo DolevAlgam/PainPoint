@@ -95,9 +95,7 @@ export async function POST(req: NextRequest) {
       MessageBody: JSON.stringify({
         userId,
         forceRefresh
-      }),
-      MessageDeduplicationId: `analyze-pain-points-${userId}-${Date.now()}`,
-      MessageGroupId: `analyze-pain-points`
+      })
     };
     
     try {
