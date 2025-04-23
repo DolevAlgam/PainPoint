@@ -99,9 +99,7 @@ export async function POST(req: NextRequest) {
         transcriptId,
         meetingId,
         userId
-      }),
-      MessageDeduplicationId: `analyze-transcript-${meetingId}-${transcriptId}-${Date.now()}`,
-      MessageGroupId: `analyze-transcript-${meetingId}`
+      })
     };
     
     try {

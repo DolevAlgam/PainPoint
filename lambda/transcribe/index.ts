@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { promises as fsp } from 'fs';
+import { File } from 'formdata-node';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -152,11 +153,11 @@ export const handler = async (event: SQSEvent, context: Context) => {
             try {
               // Read the segment file
               const fileBuffer = await fsp.readFile(segmentFile);
-              const file = new Blob([fileBuffer]);
+              const file = new File([fileBuffer], path.basename(segmentFile), { type: 'audio/m4a' });
               
               // Call OpenAI Whisper API
               const transcription = await openai.audio.transcriptions.create({
-                file: file as any,
+                file: file,
                 model: "whisper-1",
                 language: "en",
                 response_format: "text"
@@ -232,8 +233,7 @@ export const handler = async (event: SQSEvent, context: Context) => {
       const { error: updateError } = await supabase
         .from('transcripts')
         .update({
-          content: combinedTranscription,
-          status: 'completed'
+          content: combinedTranscription
         })
         .eq('recording_id', recordingId);
 
@@ -261,16 +261,16 @@ export const handler = async (event: SQSEvent, context: Context) => {
     } catch (error: any) {
       console.error(`Transcription failed: ${error.message}`);
       
-      // Update transcript status to failed
+      // Update transcript with error message
       try {
         if (recordingId) {
           await supabase
             .from('transcripts')
-            .update({ status: 'failed', error_message: error.message })
+            .update({ content: `Transcription failed: ${error.message}` })
             .eq('recording_id', recordingId);
         }
       } catch (updateError) {
-        console.error('Error updating transcript status:', updateError);
+        console.error('Error updating transcript content:', updateError);
       }
 
       // Clean up temp directory if it exists

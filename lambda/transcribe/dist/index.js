@@ -43,6 +43,7 @@ const node_fetch_1 = __importDefault(require("node-fetch"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const fs_1 = require("fs");
+const formdata_node_1 = require("formdata-node");
 // Initialize Supabase client
 const supabase = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL || '', process.env.SUPABASE_SERVICE_ROLE_KEY || '');
 // Maximum file size for OpenAI API (25MB)
@@ -71,12 +72,24 @@ const handler = async (event, context) => {
                 throw recordingError;
             }
             // Get signed URL for the recording
+            const bucketName = 'recordings';
+            const filePath = recording.file_path;
+            console.log('Attempting to get signed URL with:', {
+                bucketName,
+                filePath,
+                fullPath: recording.file_path
+            });
             const { data: signedUrlData, error: signedUrlError } = await supabase
                 .storage
-                .from(recording.file_path.split('/')[0])
-                .createSignedUrl(recording.file_path.split('/').slice(1).join('/'), 600);
+                .from(bucketName)
+                .createSignedUrl(filePath, 600);
             if (signedUrlError || !signedUrlData?.signedUrl) {
-                console.error('Error getting signed URL:', signedUrlError);
+                console.error('Error getting signed URL:', {
+                    error: signedUrlError,
+                    bucketName,
+                    filePath,
+                    fullPath: recording.file_path
+                });
                 throw new Error('Failed to get signed URL for recording');
             }
             // Create a unique temp directory for this transcription job
@@ -143,7 +156,7 @@ const handler = async (event, context) => {
                         try {
                             // Read the segment file
                             const fileBuffer = await fs_1.promises.readFile(segmentFile);
-                            const file = new Blob([fileBuffer]);
+                            const file = new formdata_node_1.File([fileBuffer], path.basename(segmentFile), { type: 'audio/m4a' });
                             // Call OpenAI Whisper API
                             const transcription = await openai.audio.transcriptions.create({
                                 file: file,
@@ -211,8 +224,7 @@ const handler = async (event, context) => {
             const { error: updateError } = await supabase
                 .from('transcripts')
                 .update({
-                content: combinedTranscription,
-                status: 'completed'
+                content: combinedTranscription
             })
                 .eq('recording_id', recordingId);
             if (updateError) {
@@ -236,17 +248,17 @@ const handler = async (event, context) => {
         }
         catch (error) {
             console.error(`Transcription failed: ${error.message}`);
-            // Update transcript status to failed
+            // Update transcript with error message
             try {
                 if (recordingId) {
                     await supabase
                         .from('transcripts')
-                        .update({ status: 'failed', error_message: error.message })
+                        .update({ content: `Transcription failed: ${error.message}` })
                         .eq('recording_id', recordingId);
                 }
             }
             catch (updateError) {
-                console.error('Error updating transcript status:', updateError);
+                console.error('Error updating transcript content:', updateError);
             }
             // Clean up temp directory if it exists
             if (tempDir) {

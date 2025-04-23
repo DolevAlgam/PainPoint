@@ -298,6 +298,10 @@ Let's show graph of meetings over time
 
 account infromation details are not being saved
 
+make sure that you can create a new contact (and company) when you schedule a meeting not only when you upload a meeting.
+
+Remove "Other" from company industry, keep "Other (Specify)" and make sure we 1. actually show an input box to capture the custom industry 2. add it to the db as another industry for that user so we can display it in the list every time from that moment.
+
 future directions:
 prep for call - prepare script
 salesops - follow up
