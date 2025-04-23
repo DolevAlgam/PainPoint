@@ -59,7 +59,7 @@ export class PainpointLambdaStack extends cdk.Stack {
       code: lambda.Code.fromAsset('../../lambda/transcribe'),
       handler: 'index.handler',
       timeout: cdk.Duration.minutes(15),
-      memorySize: 2048, // 2GB of memory
+      memorySize: 4096, // 4GB of memory
       role: lambdaRole,
       environment: {
         SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -72,8 +72,8 @@ export class PainpointLambdaStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_18_X,
       code: lambda.Code.fromAsset('../../lambda/analyze-transcript'),
       handler: 'index.handler',
-      timeout: cdk.Duration.minutes(10),
-      memorySize: 1024, // 1GB of memory
+      timeout: cdk.Duration.minutes(15),
+      memorySize: 2048, // 2GB of memory
       role: lambdaRole,
       environment: {
         SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -85,8 +85,8 @@ export class PainpointLambdaStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_18_X,
       code: lambda.Code.fromAsset('../../lambda/analyze-common-pain-points'),
       handler: 'index.handler',
-      timeout: cdk.Duration.minutes(10),
-      memorySize: 1024, // 1GB of memory
+      timeout: cdk.Duration.minutes(15),
+      memorySize: 2048, // 2GB of memory
       role: lambdaRole,
       environment: {
         SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
