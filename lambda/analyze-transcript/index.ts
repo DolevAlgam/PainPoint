@@ -161,6 +161,7 @@ async function analyzePainPoints(transcript: string, apiKey: string): Promise<an
 
 # Your Task
 Extract the pain points and challenges discussed by the potential ICP, with supporting evidence from the transcript.
+Look for pain points that come from the ICP interviewee, not from the interviewer
 
 # Requirements
 1. For each pain point:
