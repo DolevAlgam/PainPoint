@@ -184,7 +184,19 @@ export const handler = async (event: SQSEvent, context: Context) => {
               
               return { success: true, index: segmentIndex };
             } catch (segmentError: any) {
-              console.error(`Error processing segment ${segmentNum}: ${segmentError.message}`);
+              // Enhanced error logging
+              console.error(`Error processing segment ${segmentIndex + 1}:`, {
+                error: segmentError,
+                message: segmentError.message,
+                name: segmentError.name,
+                code: segmentError.code,
+                stack: segmentError.stack,
+                response: segmentError.response?.data,
+                status: segmentError.response?.status,
+                headers: segmentError.response?.headers,
+                segmentSize: (await fsp.stat(segmentFile)).size,
+                segmentPath: segmentFile
+              });
               return { success: false, index: segmentIndex, error: segmentError };
             }
           })();
