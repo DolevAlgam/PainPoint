@@ -163,10 +163,10 @@ export const handler = async (event: SQSEvent, context: Context) => {
               const fileBuffer = await fsp.readFile(segmentFile);
               const file = new File([fileBuffer], path.basename(segmentFile), { type: 'audio/m4a' });
               
-              // Call OpenAI Whisper API
+              // Call OpenAI GPT-4o-transcribe API
               const transcription = await openai.audio.transcriptions.create({
                 file: file,
-                model: "whisper-1",
+                model: "gpt-4o-transcribe",
                 language: "en",
                 response_format: "text"
               });
