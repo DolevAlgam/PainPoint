@@ -131,37 +131,28 @@ export const handler = async (event: SQSEvent, context: Context) => {
       console.log('Testing network connectivity...');
       try {
         // Test general internet connectivity
-        const { exec } = require('child_process');
-        await new Promise((resolve, reject) => {
-          exec('curl -v https://www.google.com', (error: any, stdout: any, stderr: any) => {
-            console.log('Google connectivity test:', { error, stdout, stderr });
-            if (error) {
-              console.error('Failed to reach Google:', error);
-            }
-            resolve(true);
-          });
+        const googleResponse = await fetch('https://www.google.com');
+        console.log('Google connectivity test:', {
+          status: googleResponse.status,
+          ok: googleResponse.ok
         });
 
         // Test OpenAI API connectivity
-        await new Promise((resolve, reject) => {
-          exec('curl -v https://api.openai.com/v1/audio/transcriptions', (error: any, stdout: any, stderr: any) => {
-            console.log('OpenAI API connectivity test:', { error, stdout, stderr });
-            if (error) {
-              console.error('Failed to reach OpenAI API:', error);
-            }
-            resolve(true);
-          });
+        const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'HEAD' // Just check if endpoint is reachable
+        });
+        console.log('OpenAI API connectivity test:', {
+          status: openaiResponse.status,
+          ok: openaiResponse.ok
         });
 
-        // Test DNS resolution
-        await new Promise((resolve, reject) => {
-          exec('nslookup api.openai.com', (error: any, stdout: any, stderr: any) => {
-            console.log('DNS resolution test:', { error, stdout, stderr });
-            if (error) {
-              console.error('Failed to resolve OpenAI domain:', error);
-            }
-            resolve(true);
-          });
+        // Test DNS resolution by attempting to resolve the domain
+        const dnsResponse = await fetch('https://api.openai.com', {
+          method: 'HEAD'
+        });
+        console.log('DNS resolution test:', {
+          status: dnsResponse.status,
+          ok: dnsResponse.ok
         });
       } catch (testError) {
         console.error('Network connectivity test failed:', testError);
