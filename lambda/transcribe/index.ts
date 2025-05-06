@@ -127,6 +127,46 @@ export const handler = async (event: SQSEvent, context: Context) => {
       const segmentFiles = await splitAudioFile(audioFilePath, segmentsDir);
       console.log(`Split audio into ${segmentFiles.length} segments`);
 
+      // Test network connectivity
+      console.log('Testing network connectivity...');
+      try {
+        // Test general internet connectivity
+        const { exec } = require('child_process');
+        await new Promise((resolve, reject) => {
+          exec('curl -v https://www.google.com', (error: any, stdout: any, stderr: any) => {
+            console.log('Google connectivity test:', { error, stdout, stderr });
+            if (error) {
+              console.error('Failed to reach Google:', error);
+            }
+            resolve(true);
+          });
+        });
+
+        // Test OpenAI API connectivity
+        await new Promise((resolve, reject) => {
+          exec('curl -v https://api.openai.com/v1/audio/transcriptions', (error: any, stdout: any, stderr: any) => {
+            console.log('OpenAI API connectivity test:', { error, stdout, stderr });
+            if (error) {
+              console.error('Failed to reach OpenAI API:', error);
+            }
+            resolve(true);
+          });
+        });
+
+        // Test DNS resolution
+        await new Promise((resolve, reject) => {
+          exec('nslookup api.openai.com', (error: any, stdout: any, stderr: any) => {
+            console.log('DNS resolution test:', { error, stdout, stderr });
+            if (error) {
+              console.error('Failed to resolve OpenAI domain:', error);
+            }
+            resolve(true);
+          });
+        });
+      } catch (testError) {
+        console.error('Network connectivity test failed:', testError);
+      }
+
       // Process each segment to transcribe
       const segmentTranscriptions: string[] = [];
       
