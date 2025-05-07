@@ -73,6 +73,45 @@ function isRetryableError(error: any): boolean {
   return false;
 }
 
+// Helper function to validate OpenAI API key
+async function validateApiKey(apiKey: string): Promise<{ valid: boolean; error?: string }> {
+  try {
+    console.log('Validating OpenAI API key...');
+    
+    // Create a temporary OpenAI client with the key
+    const tempOpenAI = new OpenAI({
+      apiKey: apiKey
+    });
+    
+    // Make a simple request to check if the key is valid
+    // Using models endpoint as it's lightweight and doesn't cost tokens
+    const result = await withRetry(async () => {
+      return await tempOpenAI.models.list();
+    });
+    
+    console.log('API key validation successful');
+    return { valid: true };
+  } catch (error: any) {
+    console.error('API key validation failed:', {
+      message: error.message,
+      type: error.type,
+      status: error.status
+    });
+    
+    let errorMessage = 'Invalid API key';
+    
+    if (error.status === 401) {
+      errorMessage = 'Invalid or expired OpenAI API key';
+    } else if (error.status === 429) {
+      errorMessage = 'OpenAI API rate limit exceeded';
+    } else if (error.message.includes('Connection')) {
+      errorMessage = 'Connection error while validating API key';
+    }
+    
+    return { valid: false, error: errorMessage };
+  }
+}
+
 export const handler = async (event: SQSEvent, context: Context) => {
   console.log('Received event:', JSON.stringify(event, null, 2));
   
@@ -162,6 +201,12 @@ export const handler = async (event: SQSEvent, context: Context) => {
       const openai = new OpenAI({
         apiKey: userSettings.openai_api_key
       });
+
+      // Validate the API key before proceeding
+      const keyValidation = await validateApiKey(userSettings.openai_api_key);
+      if (!keyValidation.valid) {
+        throw new Error(`OpenAI API key validation failed: ${keyValidation.error}`);
+      }
 
       // Split the audio file into segments
       const segmentsDir = path.join(tempDir, 'segments');
