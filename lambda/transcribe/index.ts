@@ -9,6 +9,11 @@ import * as os from 'os';
 import { promises as fsp } from 'fs';
 import { File } from 'formdata-node';
 
+// Maximum retries for API calls
+const MAX_RETRIES = 3;
+// Retry delay in milliseconds (exponential backoff)
+const RETRY_DELAY_MS = 1000;
+
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL || '',
@@ -29,6 +34,44 @@ const MIN_SEGMENT_DURATION = 30;
 // Get the path to the ffmpeg binaries
 const FFMPEG_PATH = path.join(__dirname, 'bin', 'ffmpeg');
 const FFPROBE_PATH = path.join(__dirname, 'bin', 'ffprobe');
+
+// Helper function to add retry logic to API calls
+async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES, delay = RETRY_DELAY_MS): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries <= 0 || !isRetryableError(error)) {
+      throw error;
+    }
+    
+    console.log(`API call failed, retrying in ${delay}ms (${retries} retries left)...`, error.message);
+    
+    // Wait before retrying
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    // Retry with exponential backoff
+    return withRetry(fn, retries - 1, delay * 2);
+  }
+}
+
+// Helper function to determine if an error is retryable
+function isRetryableError(error: any): boolean {
+  // Connection errors, timeouts, and server errors are retryable
+  const retryableStatuses = [408, 429, 500, 502, 503, 504];
+  
+  // Check for network errors
+  if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || 
+      error.message.includes('Connection error') || error.type === 'system') {
+    return true;
+  }
+  
+  // Check for specific HTTP status codes
+  if (error.status && retryableStatuses.includes(error.status)) {
+    return true;
+  }
+  
+  return false;
+}
 
 export const handler = async (event: SQSEvent, context: Context) => {
   console.log('Received event:', JSON.stringify(event, null, 2));
@@ -163,12 +206,14 @@ export const handler = async (event: SQSEvent, context: Context) => {
               const fileBuffer = await fsp.readFile(segmentFile);
               const file = new File([fileBuffer], path.basename(segmentFile), { type: 'audio/m4a' });
               
-              // Call OpenAI GPT-4o-transcribe API
-              const transcription = await openai.audio.transcriptions.create({
-                file: file,
-                model: "gpt-4o-transcribe",
-                language: "en",
-                response_format: "text"
+              // Call OpenAI GPT-4o-transcribe API with retry logic
+              const transcription = await withRetry(async () => {
+                return await openai.audio.transcriptions.create({
+                  file: file,
+                  model: "gpt-4o-transcribe",
+                  language: "en",
+                  response_format: "text"
+                });
               });
               
               // Store the result in its original order position
