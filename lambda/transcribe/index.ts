@@ -44,7 +44,24 @@ async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES, delay =
       throw error;
     }
     
-    console.log(`API call failed, retrying in ${delay}ms (${retries} retries left)...`, error.message);
+    // Enhanced error logging
+    console.log(`API call failed, retrying in ${delay}ms (${retries} retries left)...`);
+    console.error('Detailed error information:', {
+      message: error.message,
+      code: error.code,
+      type: error.type,
+      status: error.status,
+      statusText: error.statusText,
+      headers: error.headers,
+      cause: error.cause ? {
+        message: error.cause.message,
+        code: error.cause.code,
+        type: error.cause.type,
+        errno: error.cause.errno
+      } : undefined,
+      request_id: error.request_id,
+      stack: error.stack
+    });
     
     // Wait before retrying
     await new Promise(resolve => setTimeout(resolve, delay));
@@ -92,10 +109,22 @@ async function validateApiKey(apiKey: string): Promise<{ valid: boolean; error?:
     console.log('API key validation successful');
     return { valid: true };
   } catch (error: any) {
-    console.error('API key validation failed:', {
+    // Enhanced error logging
+    console.error('API key validation failed - detailed error:', {
       message: error.message,
+      code: error.code,
       type: error.type,
-      status: error.status
+      status: error.status,
+      statusText: error.statusText,
+      headers: error.headers,
+      cause: error.cause ? {
+        message: error.cause.message,
+        code: error.cause.code,
+        type: error.cause.type,
+        errno: error.cause.errno
+      } : undefined,
+      request_id: error.request_id,
+      stack: error.stack
     });
     
     let errorMessage = 'Invalid API key';
@@ -281,9 +310,18 @@ export const handler = async (event: SQSEvent, context: Context) => {
                 name: segmentError.name,
                 code: segmentError.code,
                 stack: segmentError.stack,
+                type: segmentError.type,
+                status: segmentError.status,
+                statusText: segmentError.statusText,
                 response: segmentError.response?.data,
-                status: segmentError.response?.status,
-                headers: segmentError.response?.headers,
+                headers: segmentError.headers,
+                request_id: segmentError.request_id,
+                cause: segmentError.cause ? {
+                  message: segmentError.cause.message,
+                  code: segmentError.cause.code,
+                  type: segmentError.cause.type,
+                  errno: segmentError.cause.errno
+                } : undefined,
                 segmentSize: (await fsp.stat(segmentFile)).size,
                 segmentPath: segmentFile
               });
@@ -369,7 +407,21 @@ export const handler = async (event: SQSEvent, context: Context) => {
 
       console.log(`Transcription completed successfully for meeting: ${meetingId}, recording: ${recordingId}`);
     } catch (error: any) {
-      console.error(`Transcription failed: ${error.message}`);
+      console.error(`Transcription failed:`, {
+        message: error.message,
+        code: error.code,
+        name: error.name,
+        type: error.type,
+        status: error.status,
+        statusText: error.statusText,
+        cause: error.cause ? {
+          message: error.cause.message,
+          code: error.cause.code,
+          type: error.cause.type,
+          errno: error.cause.errno
+        } : undefined,
+        stack: error.stack
+      });
       
       // Update transcript with error message
       try {
