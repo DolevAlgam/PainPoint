@@ -127,37 +127,6 @@ export const handler = async (event: SQSEvent, context: Context) => {
       const segmentFiles = await splitAudioFile(audioFilePath, segmentsDir);
       console.log(`Split audio into ${segmentFiles.length} segments`);
 
-      // Test network connectivity
-      console.log('Testing network connectivity...');
-      try {
-        // Test general internet connectivity
-        const googleResponse = await fetch('https://www.google.com');
-        console.log('Google connectivity test:', {
-          status: googleResponse.status,
-          ok: googleResponse.ok
-        });
-
-        // Test OpenAI API connectivity
-        const openaiResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'HEAD' // Just check if endpoint is reachable
-        });
-        console.log('OpenAI API connectivity test:', {
-          status: openaiResponse.status,
-          ok: openaiResponse.ok
-        });
-
-        // Test DNS resolution by attempting to resolve the domain
-        const dnsResponse = await fetch('https://api.openai.com', {
-          method: 'HEAD'
-        });
-        console.log('DNS resolution test:', {
-          status: dnsResponse.status,
-          ok: dnsResponse.ok
-        });
-      } catch (testError) {
-        console.error('Network connectivity test failed:', testError);
-      }
-
       // Process each segment to transcribe
       const segmentTranscriptions: string[] = [];
       
